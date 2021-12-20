@@ -34,6 +34,10 @@
 #include <wolfssl/wolfcrypt/ecc.h>
 #endif
 
+#if !defined(NO_SHA256)
+#include <wolfssl/wolfcrypt/sha256.h>
+#endif
+
 #if !defined(NO_AES)
 #include <wolfssl/wolfcrypt/aes.h>
 #endif
@@ -535,6 +539,64 @@ psa_status_t psa_destroy_key(psa_key_id_t key)
 #endif
 
     return PSA_ERROR_BAD_STATE;
+}
+
+
+#if !defined(NO_SHA256)
+static psa_status_t psa_sha256_hash_compute(const uint8_t *input,
+                                            size_t input_length,
+                                            uint8_t *hash,
+                                            size_t *hash_length)
+{
+    psa_status_t ret = PSA_ERROR_BAD_STATE;
+    wc_Sha256 sha256;
+    int err;
+
+    err = wc_InitSha256(&sha256);
+    if (err != 0)
+        return PSA_ERROR_BAD_STATE;
+
+    err = wc_Sha256Update(&sha256, input, input_length);
+    if (err != 0) {
+        ret = PSA_ERROR_BAD_STATE;
+        goto out_free;
+    }
+
+    err = wc_Sha256Final(&sha256, hash);
+    if (err != 0) {
+        ret = PSA_ERROR_BAD_STATE;
+        goto out_free;
+    }
+
+    *hash_length = WC_SHA256_DIGEST_SIZE;
+    ret = PSA_SUCCESS;
+
+ out_free:
+    wc_Sha256Free(&sha256);
+    return ret;
+}
+#endif
+
+psa_status_t psa_hash_compute(psa_algorithm_t alg,
+                                 const uint8_t *input,
+                                 size_t input_length,
+                                 uint8_t *hash,
+                                 size_t hash_size,
+                                 size_t *hash_length)
+{
+    if (!PSA_ALG_IS_HASH(alg))
+        return PSA_ERROR_NOT_SUPPORTED;
+
+    if (input == NULL || hash == NULL || hash_size == 0 ||
+        hash_length == NULL || PSA_HASH_LENGTH(alg) > hash_size)
+        return PSA_ERROR_INVALID_ARGUMENT;
+
+#if !defined(NO_SHA256)
+    if (alg == PSA_ALG_SHA_256)
+        return psa_sha256_hash_compute(input, input_length, hash, hash_length);
+#endif
+
+    return PSA_ERROR_NOT_SUPPORTED;
 }
 
 psa_status_t psa_cipher_encrypt(psa_key_id_t key,
