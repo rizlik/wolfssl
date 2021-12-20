@@ -180,20 +180,21 @@ extern "C" {
 #define PSA_BLOCK_CIPHER_BLOCK_MAX_SIZE 32
 
 
+#define PSA_CIPHER_IV_LENGTH(key_type, alg) /* implementation-defined value */
+#define PSA_CIPHER_IV_MAX_SIZE 16
+
 #define PSA_CIPHER_DECRYPT_OUTPUT_MAX_SIZE(input_length)    \
-    (input_length)
+    (input_length - PSA_CIPHER_IV_MAX_SIZE)
 #define PSA_CIPHER_DECRYPT_OUTPUT_SIZE(key_type, alg, input_length) \
-    (input_length)
+    (input_length - PSA_CIPHER_IV_MAX_SIZE)
 #define PSA_CIPHER_ENCRYPT_OUTPUT_MAX_SIZE(input_length)    \
-    (input_length + PSA_BLOCK_CIPHER_BLOCK_MAX_SIZE)
+    (input_length + PSA_CIPHER_IV_MAX_SIZE)
 #define PSA_CIPHER_ENCRYPT_OUTPUT_SIZE(key_type, alg, input_length) \
-        (input_length + PSA_BLOCK_CIPHER_BLOCK_MAX_SIZE)
+    (input_length + PSA_CIPHER_IV_MAX_SIZE)
 
 #define PSA_CIPHER_FINISH_OUTPUT_MAX_SIZE /* implementation-defined value */
 #define PSA_CIPHER_FINISH_OUTPUT_SIZE(key_type, alg)    \
     /* implementation-defined value */
-#define PSA_CIPHER_IV_LENGTH(key_type, alg) /* implementation-defined value */
-#define PSA_CIPHER_IV_MAX_SIZE /* implementation-defined value */
 #define PSA_CIPHER_OPERATION_INIT { 0 }
 #define PSA_CIPHER_UPDATE_OUTPUT_MAX_SIZE(input_length) \
     /* implementation-defined value */
@@ -262,6 +263,9 @@ extern "C" {
 #define PSA_KEY_DERIVATION_UNLIMITED_CAPACITY   \
     /* implementation-defined value */
 #define PSA_KEY_ID_NULL ((psa_key_id_t)0)
+
+#define PSA_KEY_ID_BUSY ((psa_key_id_t)0x4fffffff)
+
 #define PSA_KEY_ID_USER_MAX ((psa_key_id_t)0x3fffffff)
 #define PSA_KEY_ID_USER_MIN ((psa_key_id_t)0x00000001)
 #define PSA_KEY_ID_VENDOR_MAX ((psa_key_id_t)0x7fffffff)
@@ -531,14 +535,8 @@ extern "C" {
                                      psa_key_id_t * key);
     WOLFSSL_API psa_status_t psa_generate_random(uint8_t * output,
                                         size_t output_size);
-    WOLFSSL_API psa_algorithm_t psa_get_key_algorithm(const psa_key_attributes_t * attributes);
     WOLFSSL_API psa_status_t psa_get_key_attributes(psa_key_id_t key,
                                            psa_key_attributes_t * attributes);
-    WOLFSSL_API size_t psa_get_key_bits(const psa_key_attributes_t * attributes);
-    WOLFSSL_API psa_key_id_t psa_get_key_id(const psa_key_attributes_t * attributes);
-    WOLFSSL_API psa_key_lifetime_t psa_get_key_lifetime(const psa_key_attributes_t * attributes);
-    WOLFSSL_API psa_key_type_t psa_get_key_type(const psa_key_attributes_t * attributes);
-    WOLFSSL_API psa_key_usage_t psa_get_key_usage_flags(const psa_key_attributes_t * attributes);
     WOLFSSL_API psa_status_t psa_hash_abort(psa_hash_operation_t * operation);
     WOLFSSL_API psa_status_t psa_hash_clone(const psa_hash_operation_t * source_operation,
                                    psa_hash_operation_t * target_operation);
@@ -646,16 +644,10 @@ extern "C" {
     WOLFSSL_API void psa_reset_key_attributes(psa_key_attributes_t * attributes);
     WOLFSSL_API void psa_set_key_algorithm(psa_key_attributes_t * attributes,
                                   psa_algorithm_t alg);
-    WOLFSSL_API void psa_set_key_bits(psa_key_attributes_t * attributes,
-                             size_t bits);
     WOLFSSL_API void psa_set_key_id(psa_key_attributes_t * attributes,
                            psa_key_id_t id);
     WOLFSSL_API void psa_set_key_lifetime(psa_key_attributes_t * attributes,
                                  psa_key_lifetime_t lifetime);
-    WOLFSSL_API void psa_set_key_type(psa_key_attributes_t * attributes,
-                             psa_key_type_t type);
-    WOLFSSL_API void psa_set_key_usage_flags(psa_key_attributes_t * attributes,
-                                    psa_key_usage_t usage_flags);
     WOLFSSL_API psa_status_t psa_sign_hash(psa_key_id_t key,
                                   psa_algorithm_t alg,
                                   const uint8_t * hash,
@@ -744,6 +736,52 @@ WOLFSSL_API psa_status_t psa_not_implemented(void);
 #define psa_sign_message(...) psa_not_implemented();
 #define psa_verify_hash(...) psa_not_implemented();
 #define psa_verify_message(...) psa_not_implemented();
+
+static inline psa_key_id_t psa_get_key_id(const psa_key_attributes_t *attributes)
+{
+    return attributes->id;
+}
+
+static inline psa_algorithm_t psa_get_key_algorithm(const psa_key_attributes_t *attributes)
+{
+    return attributes->permitted_algs;
+}
+static inline size_t psa_get_key_bits(const psa_key_attributes_t *attributes)
+{
+    return attributes->bits;
+}
+
+static inline psa_key_lifetime_t psa_get_key_lifetime(const psa_key_attributes_t *attributes)
+{
+    return attributes->lifetime;
+}
+
+static inline psa_key_type_t psa_get_key_type(const psa_key_attributes_t *attributes)
+{
+    return attributes->type;
+}
+
+static inline psa_key_usage_t psa_get_key_usage_flags(const psa_key_attributes_t *attributes)
+{
+    return attributes->usage_flags;
+}
+
+static inline void psa_set_key_bits(psa_key_attributes_t *attributes, size_t bits)
+{
+    attributes->bits = bits;
+}
+
+static inline void psa_set_key_type(psa_key_attributes_t *attributes,
+                                    psa_key_type_t type)
+{
+    attributes->type = type;
+}
+
+static inline void psa_set_key_usage_flags(psa_key_attributes_t *attributes,
+                                           psa_key_usage_t usage_flags)
+{
+    attributes->usage_flags = usage_flags;
+}
 
 
 #ifdef __cplusplus
