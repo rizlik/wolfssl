@@ -173,3 +173,8 @@ endif
 if BUILD_IOTSAFE
 nobase_include_HEADERS+= wolfssl/wolfcrypt/port/iotsafe/iotsafe.h
 endif
+
+if BUILD_PSA
+nobase_include_HEADERS+= wolfssl/wolfcrypt/psa/crypto.h
+endif
+

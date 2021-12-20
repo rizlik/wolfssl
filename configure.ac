@@ -1109,6 +1109,18 @@ AC_ARG_ENABLE([smime],
     [ ENABLED_SMIME=no ]
     )
 
+# Platform Security Architecture (PSA)
+AC_ARG_ENABLE([psa],
+[AS_HELP_STRING([--enable-psa],[Platform Security Architecture (PSA) API (default: disabled)])],
+[ ENABLED_PSA=$enableval ],
+[ ENABLED_PSA=no ]
+)
+
+if test "x$ENABLED_PSA" = "xyes"
+then
+	AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_HAVE_PSA"
+fi
+
 # OPENSSL Compatibility ALL
 AC_ARG_ENABLE([opensslall],
 [AS_HELP_STRING([--enable-opensslall],[Enable all OpenSSL API, size++ (default: disabled)])],
@@ -7362,6 +7374,7 @@ AM_CONDITIONAL([BUILD_QNXCAAM],[test "x$ENABLED_CAAM" = "xqnx"])
 AM_CONDITIONAL([BUILD_IOTSAFE],[test "x$ENABLED_IOTSAFE" = "xyes"])
 AM_CONDITIONAL([BUILD_IOTSAFE_HWRNG],[test "x$ENABLED_IOTSAFE_HWRNG" = "xyes"])
 AM_CONDITIONAL([BUILD_SE050],[test "x$ENABLED_SE050" = "xyes"])
+AM_CONDITIONAL([BUILD_PSA],[test "x$ENABLED_PSA" = "xyes"])
 
 if test "$ENABLED_REPRODUCIBLE_BUILD" != "yes" &&
    (test "$ax_enable_debug" = "yes" ||
@@ -7759,6 +7772,7 @@ echo "   * i.MX6 CAAM:                 $ENABLED_CAAM"
 echo "   * IoT-Safe:                   $ENABLED_IOTSAFE"
 echo "   * IoT-Safe HWRNG:             $ENABLED_IOTSAFE_HWRNG"
 echo "   * NXP SE050:                  $ENABLED_SE050"
+echo "   * PSA:                        $ENABLED_PSA"
 echo ""
 echo "---"
 
