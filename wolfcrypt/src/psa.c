@@ -34,6 +34,8 @@
 #include <wolfssl/wolfcrypt/aes.h>
 #endif
 
+#include <wolfssl/wolfcrypt/random.h>
+
 static psa_key_attributes_t zero_key_attribute;
 static int psa_initialized;
 static psa_key_id_t psa_incremental_id;
@@ -162,6 +164,114 @@ void psa_reset_key_attributes(psa_key_attributes_t *attributes)
 
 
 #if !defined(NO_AES)
+static psa_status_t psa_aes_cipher_decrypt(struct wc_psa_key *key,
+                                           psa_algorithm_t alg,
+                                           const uint8_t *input,
+                                           size_t input_length,
+                                           uint8_t *output,
+                                           size_t output_size,
+                                           size_t *output_length)
+{
+    struct Aes aes;
+    int ret;
+
+#if defined(WOLFSSL_AES_COUNTER)
+    if (alg == PSA_ALG_CTR) {
+        if (input_length < AES_IV_SIZE || input_length % AES_BLOCK_SIZE != 0)
+            return PSA_ERROR_INVALID_ARGUMENT;
+
+        if (output_size < input_length - AES_IV_SIZE)
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+
+        ret = wc_AesInit(&aes, NULL, DYNAMIC_TYPE_AES);
+        if (ret != 0)
+            return PSA_ERROR_BAD_STATE;
+
+        ret = wc_AesSetKey(&aes, key->key,
+                           key->attr.bits / 8,
+                           input, /* IV is the first block of the input */
+                           AES_DECRYPTION);
+        if (ret != 0) {
+            wc_AesFree(&aes);
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        ret = wc_AesCtrEncrypt(&aes, output,
+                               input + AES_IV_SIZE,
+                               input_length - AES_IV_SIZE);
+        if (ret != 0) {
+            wc_AesFree(&aes);
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        wc_AesFree(&aes);
+        *output_length = input_length - AES_IV_SIZE;
+        return PSA_SUCCESS;
+    }
+#endif
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+static psa_status_t psa_aes_cipher_encrypt(struct wc_psa_key *key,
+                                           psa_algorithm_t alg,
+                                           const uint8_t *input,
+                                           size_t input_length,
+                                           uint8_t *output,
+                                           size_t output_size,
+                                           size_t *output_length)
+{
+    uint8_t iv[AES_IV_SIZE];
+    struct Aes aes;
+    WC_RNG rng;
+    int ret;
+
+#if defined(WOLFSSL_AES_COUNTER)
+    if (alg == PSA_ALG_CTR) {
+        if (output_size < AES_IV_SIZE + input_length)
+            return PSA_ERROR_BUFFER_TOO_SMALL;
+
+       ret = wc_InitRng(&rng);
+        if (ret != 0)
+            return PSA_ERROR_INSUFFICIENT_ENTROPY;
+
+        ret = wc_RNG_GenerateBlock(&rng, iv, AES_IV_SIZE);
+        if (ret != 0) {
+            wc_FreeRng(&rng);
+            return PSA_ERROR_INSUFFICIENT_ENTROPY;
+        }
+
+        wc_FreeRng(&rng);
+
+        ret = wc_AesInit(&aes, NULL, DYNAMIC_TYPE_AES);
+        if (ret != 0)
+            return PSA_ERROR_BAD_STATE;
+
+        ret = wc_AesSetKey(&aes, key->key,
+                           key->attr.bits / 8, iv, AES_ENCRYPTION);
+        if (ret != 0) {
+            wc_AesFree(&aes);
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        XMEMCPY(output, iv, AES_IV_SIZE);
+        ret = wc_AesCtrEncrypt(&aes,
+                               output + AES_IV_SIZE,
+                               input, input_length);
+        if (ret != 0) {
+            wc_AesFree(&aes);
+            return PSA_ERROR_BAD_STATE;
+        }
+
+        wc_AesFree(&aes);
+        *output_length = input_length + AES_IV_SIZE;
+        return PSA_SUCCESS;
+    }
+#endif
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
 static psa_status_t psa_aes_import_key(const psa_key_attributes_t *attributes,
                                        const uint8_t *data,
                                        size_t data_length,
@@ -269,6 +379,63 @@ psa_status_t psa_destroy_key(psa_key_id_t key)
 #endif
 
     return PSA_ERROR_BAD_STATE;
+}
+
+psa_status_t psa_cipher_encrypt(psa_key_id_t key,
+                                   psa_algorithm_t alg,
+                                   const uint8_t *input,
+                                   size_t input_length,
+                                   uint8_t *output,
+                                   size_t output_size,
+                                   size_t *output_length)
+{
+    struct wc_psa_key *k;
+
+    k = psa_find_key(key);
+    if (k == NULL)
+        return PSA_ERROR_INVALID_HANDLE;
+
+    if ((k->attr.usage_flags & PSA_KEY_USAGE_ENCRYPT) == 0)
+        return PSA_ERROR_NOT_PERMITTED;
+
+#if !defined(NO_AES)
+    if (k->attr.type == PSA_KEY_TYPE_AES) {
+        return psa_aes_cipher_encrypt(k, alg, input,
+                                      input_length, output,
+                                      output_size, output_length);
+    }
+#endif
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_status_t psa_cipher_decrypt(psa_key_id_t key,
+                                   psa_algorithm_t alg,
+                                   const uint8_t *input,
+                                   size_t input_length,
+                                   uint8_t *output,
+                                   size_t output_size,
+                                   size_t *output_length)
+{
+    struct wc_psa_key *k;
+
+    k = psa_find_key(key);
+    if (k == NULL)
+        return PSA_ERROR_INVALID_HANDLE;
+
+    if ((k->attr.usage_flags & PSA_KEY_USAGE_DECRYPT) == 0)
+        return PSA_ERROR_NOT_PERMITTED;
+
+#if !defined(NO_AES)
+    if (k->attr.type == PSA_KEY_TYPE_AES) {
+        return psa_aes_cipher_decrypt(k, alg, input,
+                                      input_length, output,
+                                      output_size, output_length);
+    }
+#endif
+
+    return PSA_ERROR_NOT_SUPPORTED;
+
 }
 
 #endif
