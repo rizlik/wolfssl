@@ -689,6 +689,7 @@ WOLFSSL_API psa_status_t psa_not_implemented(void);
 #define psa_aead_update(...) psa_not_implemented();
 #define psa_aead_update_ad(...) psa_not_implemented();
 #define psa_aead_verify(...) psa_not_implemented();
+#define psa_asymmetric_encrypt(...) psa_not_implemented();
 #define psa_asymmetric_decrypt(...) psa_not_implemented();
 #define psa_cipher_abort(...) psa_not_implemented();
 #define psa_cipher_decrypt_setup(...) psa_not_implemented();

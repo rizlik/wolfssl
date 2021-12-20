@@ -44,7 +44,13 @@
 
 #include <wolfssl/wolfcrypt/random.h>
 
+static psa_aead_operation_t zero_aead_operation;
+static psa_cipher_operation_t zero_cipher_operation;
+static psa_hash_operation_t zero_hash_operation;
+static psa_key_derivation_operation_t zero_key_derivation_operation;
+static psa_mac_operation_t zero_mac_operation;
 static psa_key_attributes_t zero_key_attribute;
+
 static int psa_initialized;
 static psa_key_id_t psa_incremental_id;
 
@@ -122,6 +128,36 @@ static struct wc_psa_key *psa_find_free_slot(void)
     return NULL;
 }
 
+psa_status_t psa_not_implemented(void)
+{
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+psa_aead_operation_t psa_aead_operation_init()
+{
+    return zero_aead_operation;
+}
+
+psa_cipher_operation_t psa_cipher_operation_init()
+{
+    return zero_cipher_operation;
+}
+
+psa_hash_operation_t psa_hash_operation_init()
+{
+    return zero_hash_operation;
+}
+
+psa_key_derivation_operation_t psa_key_derivation_operation_init()
+{
+    return zero_key_derivation_operation;
+}
+
+psa_mac_operation_t psa_mac_operation_init()
+{
+    return zero_mac_operation;
+}
+
 psa_key_attributes_t psa_key_attributes_init()
 {
     return zero_key_attribute;
@@ -138,6 +174,15 @@ psa_status_t psa_crypto_init()
     return PSA_SUCCESS;
 }
 
+psa_status_t psa_generate_random(uint8_t *output WC_MAYBE_UNUSED,
+                                    size_t output_size WC_MAYBE_UNUSED)
+{
+    /* appease psa-arch-tests */
+    if (psa_initialized == 0)
+        return PSA_ERROR_BAD_STATE;
+
+    return PSA_ERROR_NOT_SUPPORTED;
+}
 
 psa_status_t psa_get_key_attributes(psa_key_id_t key,
                                     psa_key_attributes_t *attributes)
