@@ -30,6 +30,10 @@
 
 #include <wolfssl/wolfcrypt/psa/crypto.h>
 
+#if defined(HAVE_ECC)
+#include <wolfssl/wolfcrypt/ecc.h>
+#endif
+
 #if !defined(NO_AES)
 #include <wolfssl/wolfcrypt/aes.h>
 #endif
@@ -162,6 +166,144 @@ void psa_reset_key_attributes(psa_key_attributes_t *attributes)
     XMEMSET(attributes, 0, sizeof(*attributes));
 }
 
+
+#ifdef HAVE_ECC
+
+#if (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES)) && ECC_MIN_KEY_SZ <= 256
+#define PSA_ECC256
+#endif
+
+static psa_status_t psa_ecc_get_curve_id(const psa_key_attributes_t *attributes,
+                                         size_t data_length,
+                                         int *curve_id,
+                                         size_t *bits,
+                                         int is_secret_key)
+{
+    size_t _bits;
+
+    switch (PSA_KEY_TYPE_ECC_GET_FAMILY(attributes->type)) {
+    case PSA_ECC_FAMILY_SECP_R1:
+
+        if (is_secret_key) {
+            _bits = data_length * 8;
+        } else {
+            /* public key encoded as 0x04,qx,qy  */
+            _bits = ((data_length - 1) / 2) * 8;
+        }
+
+        if (attributes->bits != 0 && attributes->bits != _bits)
+                        return PSA_ERROR_INVALID_ARGUMENT;
+
+        switch (_bits) {
+#if defined(PSA_ECC256) && !defined(NO_ECC_SECP)
+        case 256:
+            *curve_id = ECC_SECP256R1;
+            *bits = 256;
+            return PSA_SUCCESS;
+#endif /*defined(PSA_ECC256) && !defined(NO_ECC_SECP) */
+        default:
+            return PSA_ERROR_NOT_SUPPORTED;
+        }
+
+        break;
+    default:
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
+    /* can't reach here */
+    return PSA_ERROR_NOT_SUPPORTED;
+}
+
+static psa_status_t psa_ecc_import_key(const psa_key_attributes_t *attributes,
+                                       const uint8_t *data,
+                                       size_t data_length,
+                                       psa_key_id_t *key)
+{
+    struct wc_psa_key *new_psa_key;
+    struct ecc_key *new_ecc_key;
+    const uint8_t *qx, *qy;
+    psa_key_id_t new_id;
+    psa_key_type_t type;
+    psa_status_t ret;
+    int curve_id;
+    size_t bits;
+    int wc_ret;
+
+    type = attributes->type;
+
+    if (data_length <= 1)
+        return PSA_ERROR_INVALID_ARGUMENT;
+
+    ret = psa_ecc_get_curve_id(attributes, data_length,
+                               &curve_id, &bits,
+                               PSA_KEY_TYPE_IS_KEY_PAIR(type));
+
+    if (ret != PSA_SUCCESS)
+        return ret;
+
+    switch (PSA_KEY_TYPE_ECC_GET_FAMILY(attributes->type)) {
+    case PSA_ECC_FAMILY_SECP_R1:
+        new_ecc_key = XMALLOC(sizeof(*new_ecc_key), NULL, DYNAMIC_TYPE_ECC);
+        if (!new_ecc_key)
+            return PSA_ERROR_INSUFFICIENT_MEMORY;
+
+        if (PSA_KEY_TYPE_IS_KEY_PAIR(type)) {
+            wc_ret = wc_ecc_import_private_key_ex(data, data_length,
+                                                  NULL, 0, new_ecc_key,
+                                                  curve_id);
+            if (wc_ret != 0) {
+                ret = PSA_ERROR_INVALID_ARGUMENT;
+                goto out_free;
+            }
+
+            wc_ret = wc_ecc_make_pub(new_ecc_key, NULL);
+
+        } else {
+            qx = data + 1;
+            qy = data + 1 + bits;
+
+            wc_ret = wc_ecc_import_unsigned(new_ecc_key, qx, qy,
+                                            NULL, curve_id);
+        }
+
+        if (wc_ret != 0) {
+            ret = PSA_ERROR_INVALID_ARGUMENT;
+            goto out_free;
+        }
+        break;
+    default:
+        return PSA_ERROR_NOT_SUPPORTED;
+    }
+
+    new_id = psa_get_new_id();
+    if (new_id == PSA_KEY_ID_NULL) {
+        ret = PSA_ERROR_BAD_STATE;
+        goto out_free;
+    }
+
+    new_psa_key = psa_find_free_slot();
+    if (new_psa_key == NULL) {
+        ret = PSA_ERROR_INSUFFICIENT_STORAGE;
+        goto out_free;
+    }
+
+    new_psa_key->attr.type = attributes->type;
+    new_psa_key->attr.bits = bits;
+    new_psa_key->attr.lifetime = attributes->lifetime;
+    new_psa_key->attr.usage_flags = attributes->usage_flags;
+    new_psa_key->attr.permitted_algs = attributes->permitted_algs;
+    new_psa_key->key = (void*)new_ecc_key;
+    *key = new_id;
+    new_psa_key->attr.id = new_id;
+
+    return PSA_SUCCESS;
+
+ out_free:
+    wc_ecc_free(new_ecc_key);
+    free(new_ecc_key);
+    return ret;
+}
+#endif // HAVE_ECC
 
 #if !defined(NO_AES)
 static psa_status_t psa_aes_cipher_decrypt(struct wc_psa_key *key,
@@ -348,6 +490,11 @@ psa_status_t psa_import_key(const psa_key_attributes_t *attributes,
     if (!PSA_KEY_LIFETIME_IS_VOLATILE(attributes->lifetime))
         return PSA_ERROR_NOT_SUPPORTED;
 
+#if defined(HAVE_ECC) && defined(HAVE_ECC_KEY_IMPORT)
+    if (PSA_KEY_TYPE_IS_ECC(type))
+        return psa_ecc_import_key(attributes, data, data_length, key);
+#endif
+
 #if !defined(NO_AES)
     if (type == PSA_KEY_TYPE_AES)
         return psa_aes_import_key(attributes, data, data_length, key);
@@ -369,6 +516,15 @@ psa_status_t psa_destroy_key(psa_key_id_t key)
     k = psa_find_key(key);
     if (k == NULL)
         return PSA_ERROR_INVALID_HANDLE;
+
+#if defined(HAVE_ECC)
+    if (PSA_KEY_TYPE_IS_ECC(k->attr.type)) {
+        wc_ecc_free(k->key);
+        free(k->key);
+        psa_reset_key_attributes(&k->attr);
+        return PSA_SUCCESS;
+    }
+#endif /* HAVE_ECC */
 
 #if !defined(NO_AES)
     if (k->attr.type == PSA_KEY_TYPE_AES) {
