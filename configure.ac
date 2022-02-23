@@ -841,6 +841,17 @@ then
   AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DTLS_MTU"
 fi
 
+AC_ARG_ENABLE([dtls13],
+    [AS_HELP_STRING([--enable-dtls13],[Enable wolfSSL DTLS 13 (draft 43)(default: disabled)])],
+    [ ENABLED_DTLS13=$enableval ],
+    [ ENABLED_DTLS13=no ]
+    )
+if test "$ENABLED_DTLS13" = "yes"
+then
+  AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DTLS13 -DWOLFSSL_AES_DIRECT"
+fi
+
+
 
 # TLS v1.3 Draft 18 (Note: only final TLS v1.3 supported, here for backwards build compatibility)
 AC_ARG_ENABLE([tls13-draft18],
@@ -7690,6 +7701,7 @@ AM_CONDITIONAL([BUILD_HMAC],[test "x$ENABLED_HMAC" = "xyes"])
 AM_CONDITIONAL([BUILD_ERROR_STRINGS],[test "x$ENABLED_ERROR_STRINGS" = "xyes"])
 AM_CONDITIONAL([BUILD_DO178],[test "x$ENABLED_DO178" = "xyes"])
 AM_CONDITIONAL([BUILD_PSA],[test "x$ENABLED_PSA" = "xyes"])
+AM_CONDITIONAL([BUILD_DTLS13],[test "x$ENABLED_DTLS13" = "xyes"])
 
 if test "$ENABLED_REPRODUCIBLE_BUILD" != "yes" &&
    (test "$ax_enable_debug" = "yes" ||
