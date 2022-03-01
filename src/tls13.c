@@ -3180,7 +3180,13 @@ int SendTls13ClientHello(WOLFSSL* ssl)
     switch (ssl->options.asyncState) {
     case TLS_ASYNC_BEGIN:
     {
+
     args->idx = RECORD_HEADER_SZ + HANDSHAKE_HEADER_SZ;
+
+#ifdef WOLFSSL_DTLS13
+    if (ssl->options.dtls)
+        args->idx += DTLS_RECORD_EXTRA + DTLS_HANDSHAKE_EXTRA;
+#endif /* WOLFSSL_DTLS13 */
 
     /* Version | Random | Session Id | Cipher Suites | Compression */
     args->length = VERSION_SZ + RAN_LEN + ENUM_LEN + ssl->suites->suiteSz +
@@ -3191,6 +3197,12 @@ int SendTls13ClientHello(WOLFSSL* ssl)
     if (ssl->session.sessionIDSz > 0)
         args->length += ssl->session.sessionIDSz;
 #endif
+
+#ifdef WOLFSSL_DTLS13
+    /* legacy_cookie_id (always 0 length) */
+    if (ssl->options.dtls)
+        args->length += OPAQUE8_LEN;
+#endif /* WOLFSSL_DTLS13 */
 
     /* Advance state and proceed */
     ssl->options.asyncState = TLS_ASYNC_BUILD;
@@ -3236,6 +3248,11 @@ int SendTls13ClientHello(WOLFSSL* ssl)
 
     /* Total message size. */
     args->sendSz = args->length + HANDSHAKE_HEADER_SZ + RECORD_HEADER_SZ;
+
+#ifdef WOLFSSL_DTLS13
+    if (ssl->options.dtls)
+        args->sendSz += DTLS_RECORD_EXTRA + DTLS_HANDSHAKE_EXTRA;
+#endif /* WOLFSSL_DTLS13 */
 
     /* Check buffers are big enough and grow if needed. */
     if ((ret = CheckAvailableSize(ssl, args->sendSz)) != 0)
@@ -3289,6 +3306,12 @@ int SendTls13ClientHello(WOLFSSL* ssl)
     #endif /* WOLFSSL_TLS13_MIDDLEBOX_COMPAT */
     }
 
+#ifdef WOLFSSL_DTLS13
+    /* legacy_cookie_id. always 0 length vector */
+    if (ssl->options.dtls)
+        args->output[args->idx++] = 0;
+#endif /* WOLFSSL_DTLS13 */
+
     /* Cipher suites */
     c16toa(ssl->suites->suiteSz, args->output + args->idx);
     args->idx += OPAQUE16_LEN;
@@ -3339,6 +3362,14 @@ int SendTls13ClientHello(WOLFSSL* ssl)
                       WRITE_PROTO, ssl->heap);
     }
 #endif
+
+#ifdef WOLFSSL_DTLS13
+    if (ssl->options.dtls) {
+        ret = Dtls13HandshakeSend(ssl, args->output, args->sendSz,
+                                  args->idx, client_hello, 0);
+        break;
+    }
+#endif /* WOLFSSL_DTLS13 */
 
     ssl->buffers.outputBuffer.length += args->sendSz;
 
