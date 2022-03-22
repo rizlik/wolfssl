@@ -126,7 +126,7 @@ static int Dtls13RlAddPlaintextHeader(
     hdr->legacyVersionRecord.minor = DTLSv1_2_MINOR;
 
     /* writeSeq updates both epoch and seq */
-    WriteSEQ(ssl, CUR_ORDER, hdr->epoch);
+    Dtls13GetSeq(ssl, CUR_ORDER, (word32*)hdr->epoch, 1);
     c16toa(length, hdr->length);
 
     return 0;
@@ -690,6 +690,13 @@ int Dtls13ParseUnifedRecordLayer(WOLFSSL *ssl, const byte *input,
     return 0;
 }
 
+static WC_INLINE void Dtls13MakeRN(
+    word32 epoch, word16 seqHi, word32 seqLo, word32 seq[2])
+{
+    seq[0] = (epoch << 16) | (seqHi & 0xFFFF);
+    seq[1] = seqLo;
+}
+
 /**
  * Dtls13HandshakeRecv() - process an handshake message. Deal with
  fragmentation if needed
@@ -969,6 +976,47 @@ static void Dtls13EpochCopyKeys(Dtls13Epoch *e, Keys *k)
     XMEMCPY(e->server_sn_key, k->server_sn_key,
             sizeof(e->server_sn_key));
 
+}
+static WC_INLINE void Dtls13SeqInc(word16 *seqHi, word32 *seqLo)
+{
+    *seqLo = *seqLo + 1;
+    if (*seqLo == 0)
+        *seqHi = *seqHi + 1;
+}
+
+int Dtls13GetSeq(WOLFSSL *ssl, int order, word32 seq[2], byte increment)
+{
+    word16 epoch;
+    word16 *seqHi;
+    word32 *seqLo;
+
+    if (order == PEER_ORDER) {
+        epoch = ssl->keys.curEpoch;
+        seqHi = &ssl->keys.curSeq_hi;
+        seqLo = &ssl->keys.curSeq_lo;
+        /* never increment seq number for curent record. In DTLS seq number are
+           explicit */
+        increment = 0;
+    }
+    else if (order == CUR_ORDER) {
+
+        if (ssl->dtls13EncryptEpoch == NULL) {
+            return BAD_STATE_E;
+        }
+
+        epoch = ssl->dtls13EncryptEpoch->epochNumber;
+        seqHi = &ssl->dtls13EncryptEpoch->nextSeqNumberHi;
+        seqLo = &ssl->dtls13EncryptEpoch->nextSeqNumberLo;
+    }
+    else {
+        return BAD_FUNC_ARG;
+    }
+
+    Dtls13MakeRN(epoch, *seqHi, *seqLo, seq);
+    if (increment)
+        Dtls13SeqInc(seqHi, seqLo);
+
+    return 0;
 }
 
 int Dtls13NewEpoch(WOLFSSL *ssl, word32 epochNumber)
