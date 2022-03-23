@@ -14024,6 +14024,8 @@ int wolfSSL_dtls_got_timeout(WOLFSSL* ssl)
     if (ssl->options.dtls && IsAtLeastTLSv1_3(ssl->version)) {
         result = Dtls13RtxTimeout(ssl);
         if (result < 0) {
+            if (result == WANT_WRITE)
+                ssl->dtls13SendingAckOrRtx = 1;
             ssl->error = result;
             WOLFSSL_ERROR(result);
             return WOLFSSL_FATAL_ERROR;
@@ -14254,6 +14256,7 @@ int wolfSSL_DTLS_SetCookieSecret(WOLFSSL* ssl,
     #if !(defined(WOLFSSL_NO_TLS12) && defined(NO_OLD_TLS) && defined(WOLFSSL_TLS13))
         int neededState;
     #endif
+        byte advanceState;
 
         WOLFSSL_ENTER("SSL_connect()");
 
@@ -14315,6 +14318,16 @@ int wolfSSL_DTLS_SetCookieSecret(WOLFSSL* ssl,
         }
         #endif
 
+        /* fragOffset is non-zero when sending fragments. On the last
+         * fragment, fragOffset is zero again, and the state can be
+         * advanced. */
+        advanceState = ssl->fragOffset == 0;
+
+#ifdef WOLFSSL_DTLS13
+        if (ssl->options.dtls && IsAtLeastTLSv1_3(ssl->version))
+            advanceState = advanceState && !ssl->dtls13SendingAckOrRtx;
+#endif /* WOLFSSL_DTLS13 */
+
         if (ssl->buffers.outputBuffer.length > 0
         #ifdef WOLFSSL_ASYNC_CRYPT
             /* do not send buffered or advance state if last error was an
@@ -14323,11 +14336,13 @@ int wolfSSL_DTLS_SetCookieSecret(WOLFSSL* ssl,
         #endif
         ) {
             if ( (ssl->error = SendBuffered(ssl)) == 0) {
-                /* fragOffset is non-zero when sending fragments. On the last
-                 * fragment, fragOffset is zero again, and the state can be
-                 * advanced. */
-                if (ssl->fragOffset == 0) {
+                if (advanceState) {
                     ssl->options.connectState++;
+#ifdef WOLFSSL_DTLS13
+                    if (ssl->options.dtls)
+                        ssl->dtls13SendingAckOrRtx = 0;
+#endif /* WOLFSSL_DTLS13 */
+
                     WOLFSSL_MSG("connect state: "
                                 "Advanced from last buffered fragment send");
                 }
@@ -14395,6 +14410,8 @@ int wolfSSL_DTLS_SetCookieSecret(WOLFSSL* ssl,
                        is a DTLS with version less than 1.3, it shoudl just
                        ignore the message */
                     if ((ssl->error = SendDtls13Ack(ssl)) < 0) {
+                        if (ssl->error == WANT_WRITE)
+                            ssl->dtls13SendingAckOrRtx = 1;
                         WOLFSSL_ERROR(ssl->error);
                         return WOLFSSL_FATAL_ERROR;
                     }

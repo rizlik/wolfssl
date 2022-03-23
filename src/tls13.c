@@ -8716,7 +8716,8 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
 
 #ifdef WOLFSSL_DTLS13
     if (ssl->options.dtls)
-        advanceState = advanceState && !ssl->dtls13SendingFragments;
+        advanceState = advanceState && !ssl->dtls13SendingFragments
+            && !ssl->dtls13SendingAckOrRtx;
 #endif /* WOLFSSL_DTLS13 */
 
     if (ssl->buffers.outputBuffer.length > 0
@@ -8736,6 +8737,12 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
                 WOLFSSL_MSG("connect state: "
                             "Not advanced, more fragments to send");
             }
+
+#ifdef WOLFSSL_DTLS13
+            if (ssl->options.dtls)
+                ssl->dtls13SendingAckOrRtx =0;
+#endif /* WOLFSSL_DTLS13 */
+
         }
         else {
             WOLFSSL_ERROR(ssl->error);
@@ -9730,8 +9737,8 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
 
 #ifdef WOLFSSL_DTLS13
         if (ssl->options.dtls)
-            advanceState = advanceState &&
-                !ssl->dtls13SendingFragments;
+            advanceState = advanceState && !ssl->dtls13SendingFragments
+                && !ssl->dtls13SendingAckOrRtx;
 #endif /* WOLFSSL_DTLS13 */
 
         if ((ssl->error = SendBuffered(ssl)) == 0) {
@@ -9744,6 +9751,12 @@ int wolfSSL_accept_TLSv13(WOLFSSL* ssl)
                 WOLFSSL_MSG("accept state: "
                             "Not advanced, more fragments to send");
             }
+
+#ifdef WOLFSSL_DTLS13
+            if (ssl->options.dtls)
+                ssl->dtls13SendingAckOrRtx =0;
+#endif /* WOLFSSL_DTLS13 */
+
         }
         else {
             WOLFSSL_ERROR(ssl->error);

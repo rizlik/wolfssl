@@ -4483,6 +4483,7 @@ typedef struct Dtls13RtxFSM {
     /* used to store the message if it needs to be fragmented */
     buffer dtls13FragmentsBuffer;
     byte dtls13SendingFragments:1;
+    byte dtls13SendingAckOrRtx:1;
     word32 dtls13MessageLength;
     word32 dtls13FragOffset;
     byte dtls13FragHandshakeType;
