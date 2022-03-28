@@ -4307,7 +4307,7 @@ typedef struct Dtls13Epoch {
     byte isValid;
 } Dtls13Epoch;
 
-#define DTLS13_EPOCH_SIZE 3
+#define DTLS13_EPOCH_SIZE 4
 
 #define DTLS13_RETRANS_RN_SIZE 3
 
