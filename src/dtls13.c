@@ -1346,8 +1346,8 @@ int Dtls13HandshakeSend(WOLFSSL *ssl, byte *message, word16 outputSize,
     maxLen = length;
 
     if (maxLen < maxFrag) {
-        ret = Dtls13SendOneFragmentRtx(ssl, fsm, handshakeType, outputSize,
-                                       message, length, hashOutput);
+        ret = Dtls13SendOneFragmentRtx(
+            ssl, fsm, handshakeType, outputSize, message, length, hashOutput);
         if (ret == 0 || ret == WANT_WRITE)
             ssl->keys.dtls_handshake_number++;
     }
