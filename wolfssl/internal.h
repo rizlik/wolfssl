@@ -5344,6 +5344,8 @@ WOLFSSL_LOCAL int DoDtls13Ack(
     WOLFSSL *ssl, const byte *input, word32 inputSize, word32 *processedSize);
 
 WOLFSSL_LOCAL int SendDtls13Ack(WOLFSSL *ssl);
+WOLFSSL_LOCAL int Dtls13RtxProcessingCertificate(
+    WOLFSSL *ssl, byte *input, word32 inputSize);
 #endif /* WOLFSSL_DTLS13 */
 
 #ifdef WOLFSSL_STATIC_EPHEMERAL

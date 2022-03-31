@@ -1965,4 +1965,45 @@ int SendDtls13Ack(WOLFSSL *ssl)
     return SendBuffered(ssl);
 }
 
+int Dtls13RtxProcessingCertificate(WOLFSSL *ssl, byte *input, word32 inputSize)
+{
+    Dtls13RtxRecord *rtxRecord, *r;
+    byte ctxLength;
+
+    WOLFSSL_ENTER("Dtls13RtxProcessingCertificate");
+
+    if (inputSize <= 1) {
+        WOLFSSL_MSG("Malformed Certificate");
+        return BAD_FUNC_ARG;
+    }
+
+    ctxLength = *input;
+
+    if (inputSize < ctxLength + OPAQUE8_LEN) {
+        WOLFSSL_MSG("Malformed Certificate");
+        return BAD_FUNC_ARG;
+    }
+
+    rtxRecord = ssl->dtls13PostAuthFSM.rtxRecords;
+
+    if (Dtls13RtxRecordMatchesReqCtx(rtxRecord, input + 1, ctxLength)) {
+        ssl->dtls13PostAuthFSM.rtxRecords = rtxRecord->next;
+        Dtls13FreeRtxBufferRecord(ssl, rtxRecord);
+        return 0;
+    }
+
+    while(rtxRecord->next != NULL) {
+        if (Dtls13RtxRecordMatchesReqCtx(
+                rtxRecord->next, input + 1, ctxLength)) {
+            r = rtxRecord->next;
+            rtxRecord->next = r->next;
+            Dtls13FreeRtxBufferRecord(ssl, rtxRecord);
+            return 0;
+        }
+    }
+
+    WOLFSSL_MSG("Can't find any previous Certificate Request");
+    return 0;
+}
+
 #endif /* WOLFSSL_DTLS13 */
