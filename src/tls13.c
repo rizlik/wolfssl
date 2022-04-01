@@ -6794,6 +6794,14 @@ static int DoTls13Certificate(WOLFSSL* ssl, byte* input, word32* inOutIdx,
     WOLFSSL_START(WC_FUNC_CERTIFICATE_DO);
     WOLFSSL_ENTER("DoTls13Certificate");
 
+#ifdef WOLFSSL_DTLS13
+    if (ssl->options.dtls && ssl->options.handShakeDone) {
+        /* certificate needs some special care after the handshake */
+        Dtls13RtxProcessingCertificate(
+            ssl, input + *inOutIdx, totalSz - *inOutIdx);
+    }
+#endif /* WOLFSSL_DTLS13 */
+
     ret = ProcessPeerCerts(ssl, input, inOutIdx, totalSz);
     if (ret == 0) {
 #if !defined(NO_WOLFSSL_CLIENT)
@@ -7390,11 +7398,6 @@ int DoTls13Finished(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
         ssl->options.clientState = CLIENT_FINISHED_COMPLETE;
         ssl->options.handShakeState = HANDSHAKE_DONE;
         ssl->options.handShakeDone  = 1;
-
-#ifdef WOLFSSL_DTLS13
-        /* server MUST ack the a flight that end with a finished message */
-        ssl->handshakeRtxFSM.sendAcks = 1;
-#endif /* WOLFSSL_DTLS13 */
     }
 #endif
 
@@ -7562,6 +7565,16 @@ static int SendTls13Finished(WOLFSSL* ssl)
 #endif
         if ((ret = SetKeysSide(ssl, ENCRYPT_SIDE_ONLY)) != 0)
             return ret;
+
+#ifdef WOLFSSL_DTLS13
+        if (isDtls) {
+            Dtls13NewEpoch(ssl, DTLS13_EPOCH_TRAFFIC0);
+            Dtls13SetEpochKeys(
+                ssl, DTLS13_EPOCH_TRAFFIC0, ENCRYPT_AND_DECRYPT_SIDE);
+            ssl->dtls13Epoch = DTLS13_EPOCH_TRAFFIC0;
+        }
+#endif /* WOLFSSL_DTLS13 */
+
     }
 
     if (ssl->options.side == WOLFSSL_CLIENT_END &&
@@ -7583,16 +7596,16 @@ static int SendTls13Finished(WOLFSSL* ssl)
         if (ret != 0)
             return ret;
 #endif
-    }
 
 #ifdef WOLFSSL_DTLS13
-    if (isDtls) {
-        Dtls13NewEpoch(ssl, DTLS13_EPOCH_TRAFFIC0);
-        Dtls13SetEpochKeys(
-            ssl, DTLS13_EPOCH_TRAFFIC0, ENCRYPT_AND_DECRYPT_SIDE);
-        ssl->dtls13Epoch = DTLS13_EPOCH_TRAFFIC0;
-    }
+        if (isDtls) {
+            Dtls13NewEpoch(ssl, DTLS13_EPOCH_TRAFFIC0);
+            Dtls13SetEpochKeys(
+                ssl, DTLS13_EPOCH_TRAFFIC0, ENCRYPT_AND_DECRYPT_SIDE);
+            ssl->dtls13Epoch = DTLS13_EPOCH_TRAFFIC0;
+        }
 #endif /* WOLFSSL_DTLS13 */
+    }
 
 #ifndef NO_WOLFSSL_CLIENT
     if (ssl->options.side == WOLFSSL_CLIENT_END) {
@@ -8830,8 +8843,8 @@ int DoTls13HandShakeMsgType(WOLFSSL* ssl, byte* input, word32* inOutIdx,
 #ifdef WOLFSSL_DTLS13
                 if (ssl->options.dtls) {
                     Dtls13NewEpoch(ssl, DTLS13_EPOCH_HANDSHAKE);
-                    Dtls13SetEpochKeys(ssl, DTLS13_EPOCH_HANDSHAKE,
-                                       ENCRYPT_AND_DECRYPT_SIDE);
+                    Dtls13SetEpochKeys(
+                        ssl, DTLS13_EPOCH_HANDSHAKE, ENCRYPT_AND_DECRYPT_SIDE);
                     ssl->dtls13Epoch = DTLS13_EPOCH_HANDSHAKE;
                 }
 #endif /* WOLFSSL_DTLS13 */
@@ -8861,6 +8874,15 @@ int DoTls13HandShakeMsgType(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                 ssl->options.connectState  = FIRST_REPLY_DONE;
                 ssl->options.handShakeState = CLIENT_HELLO_COMPLETE;
                 ssl->options.processReply = 0; /* doProcessInit */
+
+                /*
+                   DTLSv1.3 note: We can't reset serverState to
+                   SERVER_FINISHED_COMPLETE with the goal that this connect
+                   blocks until the cert/cert_verify/finished flight gets ACKed
+                   by the server. The problem is that we will invoke
+                   ProcessReplyEx() in that case, but we came here from
+                   ProcessReplyEx() and it is not re-entrant safe (the input
+                   buffer would still have the certificate_request message). */
 
                 if (wolfSSL_connect_TLSv13(ssl) != WOLFSSL_SUCCESS) {
                     ret = ssl->error;

@@ -407,8 +407,7 @@ int EmbedReceiveFrom(WOLFSSL *ssl, char *buf, int sz, void *ctx)
 #ifdef WOLFSSL_DTLS13
     if (ssl->options.dtls) {
         doDtlsTimeout = doDtlsTimeout ||
-                        (ssl->options.side == WOLFSSL_CLIENT_END &&
-                         ssl->options.connectState == WAIT_FINISHED_ACK);
+                        ssl->handshakeRtxFSM.rtxRecords != NULL;
     }
 #endif /* WOLFSSL_DTLS13 */
 
