@@ -70,6 +70,155 @@ void DtlsResetState(WOLFSSL* ssl)
     ssl->options.clientState = 0;
 }
 
+#if !defined(NO_WOLFSSL_SERVER)
+
+#if defined(NO_SHA) && defined(NO_SHA256)
+#error "DTLS needs either SHA or SHA-256"
+#endif /* NO_SHA && NO_SHA256 */
+
+#if !defined(NO_SHA) && defined(NO_SHA256)
+#define DTLS_COOKIE_TYPE WC_SHA
+#define DTLS_COOKIE_SZ WC_SHA_DIGEST_SIZE
+#endif /* !NO_SHA && NO_SHA256 */
+
+#ifndef NO_SHA256
+#define DTLS_COOKIE_TYPE WC_SHA256
+#define DTLS_COOKIE_SZ WC_SHA256_DIGEST_SIZE
+#endif /* !NO_SHA256 */
+
+typedef struct Vector {
+    word32 size;
+    const byte* elements;
+} Vector;
+
+typedef struct CH {
+    ProtocolVersion* pv;
+    const byte* random;
+    Vector sessionId;
+    Vector cookie;
+    Vector cipherSuite;
+    Vector compression;
+    Vector extension;
+    word32 length;
+} CH;
+
+static int ReadVector8(const byte* input, Vector* v)
+{
+    v->size = *input;
+    v->elements = input + OPAQUE8_LEN;
+    return v->size + OPAQUE8_LEN;
+}
+
+static int ReadVector16(const byte* input, Vector* v)
+{
+    word16 size16;
+    ato16(input, &size16);
+    v->size = (word32)size16;
+    v->elements = input + OPAQUE16_LEN;
+    return v->size + OPAQUE16_LEN;
+}
+
+static int CreateDtlsCookie(WOLFSSL* ssl, const CH* ch, byte* cookie)
+{
+    Hmac cookieHmac;
+    int ret;
+
+    XMEMSET(&cookieHmac, 0, sizeof(Hmac));
+    ret = wc_HmacSetKey(&cookieHmac, DTLS_COOKIE_TYPE,
+        ssl->buffers.dtlsCookieSecret.buffer,
+        ssl->buffers.dtlsCookieSecret.length);
+    if (ret != 0)
+        goto out;
+    ret = wc_HmacUpdate(&cookieHmac, (const byte*)ssl->buffers.dtlsCtx.peer.sa,
+        ssl->buffers.dtlsCtx.peer.sz);
+    if (ret != 0)
+        goto out;
+    ret = wc_HmacUpdate(&cookieHmac, (byte*)ch->pv, OPAQUE16_LEN);
+    if (ret != 0)
+        goto out;
+    ret = wc_HmacUpdate(&cookieHmac, (byte*)ch->random, RAN_LEN);
+    if (ret != 0)
+        goto out;
+    ret = wc_HmacUpdate(&cookieHmac, (byte*)ch->sessionId.elements,
+        ch->sessionId.size);
+    if (ret != 0)
+        goto out;
+    ret = wc_HmacUpdate(&cookieHmac, (byte*)ch->cipherSuite.elements,
+        ch->cipherSuite.size);
+    if (ret != 0)
+        goto out;
+    ret = wc_HmacUpdate(&cookieHmac, (byte*)ch->compression.elements,
+        ch->compression.size);
+    if (ret != 0)
+        goto out;
+    ret = wc_HmacFinal(&cookieHmac, cookie);
+
+out:
+    wc_HmacFree(&cookieHmac);
+    return ret;
+}
+
+static int ParseClientHello(const byte* input, word32 helloSz, CH* ch)
+{
+    word32 idx = 0;
+
+    /* protocol version, random and session id length check */
+    if (OPAQUE16_LEN + RAN_LEN + OPAQUE8_LEN > helloSz)
+        return BUFFER_ERROR;
+
+    ch->pv = (ProtocolVersion*)(input + idx);
+    idx += OPAQUE16_LEN;
+    ch->random = (byte*)(input + idx);
+    idx += RAN_LEN;
+    idx += ReadVector8(input + idx, &ch->sessionId);
+    if (idx > helloSz)
+        return BUFFER_ERROR;
+    if (helloSz - idx < OPAQUE8_LEN)
+        return BUFFER_ERROR;
+    idx += ReadVector8(input + idx, &ch->cookie);
+    if (idx > helloSz)
+        return BUFFER_ERROR;
+    if (helloSz - idx < OPAQUE16_LEN)
+        return BUFFER_ERROR;
+    idx += ReadVector16(input + idx, &ch->cipherSuite);
+    if (idx > helloSz)
+        return BUFFER_ERROR;
+    idx += ReadVector8(input + idx, &ch->compression);
+    if (idx > helloSz)
+        return BUFFER_ERROR;
+    if (helloSz - idx < OPAQUE16_LEN)
+        return BUFFER_ERROR;
+    idx += ReadVector16(input + idx, &ch->extension);
+    if (idx > helloSz)
+        return BUFFER_ERROR;
+    ch->length = idx;
+    return 0;
+}
+
+int DoClientHelloStateless(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
+    word32 helloSz, byte* process)
+{
+    byte cookie[DTLS_COOKIE_SZ];
+    int ret;
+    CH ch;
+
+    *process = 1;
+    ret = ParseClientHello(input + *inOutIdx, helloSz, &ch);
+    if (ret != 0)
+        return ret;
+    ret = CreateDtlsCookie(ssl, &ch, cookie);
+    if (ret != 0)
+        return ret;
+    if (ch.cookie.size != DTLS_COOKIE_SZ ||
+        XMEMCMP(ch.cookie.elements, cookie, DTLS_COOKIE_SZ) != 0) {
+        *process = 0;
+        ret = SendHelloVerifyRequest(ssl, cookie, DTLS_COOKIE_SZ);
+    }
+
+    return ret;
+}
+#endif /* !defined(NO_WOLFSSL_SERVER) */
+
 #if defined(WOLFSSL_DTLS_CID)
 
 typedef struct ConnectionID {
@@ -423,5 +572,4 @@ int wolfSSL_dtls_cid_get_tx(WOLFSSL* ssl, unsigned char* buf,
 }
 
 #endif /* WOLFSSL_DTLS_CID */
-
 #endif /* WOLFSSL_DTLS */
