@@ -65,13 +65,6 @@
  *     may be received by a client. To support detecting this, peek will
  *     return WOLFSSL_ERROR_WANT_READ.
  *     This define turns off this behaviour.
- * WOLFSSL_DTLS_NO_HVR_ON_RESUME
- *     If defined, a DTLS server will not do a cookie exchange on successful
- *     client resumption: the resumption will be faster (one RTT less) and
- *     will consume less bandwidth (one ClientHello and one HelloVerifyRequest
- *     less). On the other hand, if a valid SessionID is collected, forged
- *     clientHello messages will consume resources on the server.
- *     This define is turned off by default.
  * WOLFSSL_HOSTNAME_VERIFY_ALT_NAME_ONLY
  *     Verify hostname/ip address using alternate name (SAN) only and do not
  *     use the common name. Forces use of the alternate name, so certificates
@@ -212,6 +205,10 @@ WOLFSSL_CALLBACKS needs LARGE_STATIC_BUFFERS, please add LARGE_STATIC_BUFFERS
 #define WOLFSSL_DTLS13_SEND_MOREACK_DEFAULT 0
 #endif
 #endif /* WOLFSSL_DTLS13 */
+
+#ifdef WOLFSSL_DTLS_NO_HVR_ON_RESUME
+#error "WOLFSSL_DTLS_NO_HVR_ON_RESUME is no longer supported"
+#endif
 
 enum processReply {
     doProcessInit = 0,
@@ -33155,14 +33152,12 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
             }
 
 
-#ifndef WOLFSSL_DTLS_NO_HVR_ON_RESUME
             if (peerCookieSz != cookieSz ||
                  XMEMCMP(peerCookie, newCookie, cookieSz) != 0) {
                 *inOutIdx += helloSz;
                 ret = SendHelloVerifyRequest(ssl, newCookie, cookieSz);
                 goto out;
             }
-#endif /* !WOLFSSL_DTLS_NO_HVR_ON_RESUME */
 
 
         }
@@ -33348,20 +33343,6 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
             }
         }
 
-#if defined(WOLFSSL_DTLS) && defined(WOLFSSL_DTLS_NO_HVR_ON_RESUME)
-        if (IsDtlsNotSctpMode(ssl) && IsDtlsNotSrtpMode(ssl) && !IsSCR(ssl)) {
-
-            if (!ssl->options.resuming) {
-                /* resume failed, check the cookie */
-                if (peerCookieSz != cookieSz ||
-                    XMEMCMP(peerCookie, newCookie, cookieSz) != 0) {
-                    *inOutIdx = begin + helloSz;
-                    ret = SendHelloVerifyRequest(ssl, newCookie, cookieSz);
-                    goto out;
-                }
-            }
-        }
-#endif /* WOLFSSL_DTLS && WOLFSSL_DTLS_NO_HVR_ON_RESUME */
 
 #if defined(HAVE_TLS_EXTENSIONS) && defined(HAVE_DH_DEFAULT_PARAMS)
     #if defined(HAVE_FFDHE) && defined(HAVE_SUPPORTED_CURVES)
