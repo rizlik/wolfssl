@@ -1932,7 +1932,7 @@ WOLFSSL_LOCAL int  DoClientHello(WOLFSSL* ssl, const byte* input, word32* inOutI
                              word32 helloSz);
 #ifdef WOLFSSL_TLS13
 WOLFSSL_LOCAL int DoTls13ClientHello(WOLFSSL* ssl, const byte* input,
-                                     word32* inOutIdx, word32 helloSz);
+                                     word32* inOutIdx, word32 helloSz, byte skipStateless);
 #endif
 WOLFSSL_LOCAL int  DoServerHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
                       word32 helloSz);
@@ -2760,6 +2760,10 @@ typedef struct PointFormat {
     struct PointFormat* next;   /* List Behavior */
 } PointFormat;
 
+WOLFSSL_LOCAL int TLSX_SupportedCurve_New(SupportedCurve** curve, word16 name,
+                                          void* heap);
+WOLFSSL_LOCAL int TLSX_SupportedCurve_Append(SupportedCurve* list, word16 name,
+                               void* heap);
 WOLFSSL_LOCAL int TLSX_UseSupportedCurve(TLSX** extensions, word16 name,
                                                                     void* heap);
 
@@ -5617,6 +5621,10 @@ WOLFSSL_LOCAL int cipherExtraData(WOLFSSL* ssl);
 #if !defined(NO_WOLFSSL_SERVER)
     WOLFSSL_LOCAL int DoClientHelloStateless(WOLFSSL* ssl, const byte* input,
         word32* inOutIdx, word32 helloSz, byte *process);
+#ifdef WOLFSSL_DTLS13
+    WOLFSSL_LOCAL int DoTls13ClientHelloStateless(WOLFSSL* ssl,
+        const byte *input, word32* inOutIdx, word32 helloSz, byte *process);
+#endif /* WOLFSSL_DTLS13 */
 #endif /* !defined(NO_WOLFSSL_SERVER) */
 #endif /* WOLFSSL_DTLS */
 

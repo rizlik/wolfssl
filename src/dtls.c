@@ -217,6 +217,108 @@ int DoClientHelloStateless(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 
     return ret;
 }
+#ifdef WOLFSSL_DTLS13
+
+#ifdef HAVE_SUPPORTED_CURVES
+static int copySupportedCurves(WOLFSSL *sslTemp, WOLFSSL *ssl)
+{
+    SupportedCurve *srcCurve, *dstCurve;
+    TLSX *src, *dst;
+    int ret;
+
+    src = TLSX_Find(ssl->extensions, TLSX_SUPPORTED_GROUPS);
+    if (!src)
+        return 0;
+    srcCurve = (SupportedCurve*)src->data;
+    if (srcCurve == NULL)
+        return 0;
+    ret = TLSX_Push(&sslTemp->extensions, TLSX_SUPPORTED_GROUPS, NULL,
+        sslTemp->heap);
+    if (ret != 0)
+        return ret;
+    dst = TLSX_Find(sslTemp->extensions, TLSX_SUPPORTED_GROUPS);
+    if (!dst)
+        return BAD_STATE_E;
+    ret = TLSX_SupportedCurve_New(&dstCurve, srcCurve->name, sslTemp->heap);
+    if (ret != 0)
+        return ret;
+    dst->data = dstCurve;
+    srcCurve = srcCurve->next;
+    while (srcCurve != NULL) {
+        dstCurve = dstCurve->next;
+        ret = TLSX_SupportedCurve_New(&dstCurve, srcCurve->name, sslTemp->heap);
+        if (ret != 0)
+            return ret;
+        srcCurve = srcCurve->next;
+    }
+
+    return WOLFSSL_SUCCESS;
+
+}
+#endif /* HAVE_SUPPORTED_CURVES */
+
+int DoTls13ClientHelloStateless(WOLFSSL* ssl, const byte* input,
+    word32* inOutIdx, word32 helloSz, byte *process)
+{
+    WOLFSSL *sslTemp;
+    word32 tmp;
+    int ret;
+
+    sslTemp = wolfSSL_new(ssl->ctx);
+    if (sslTemp == NULL)
+        return MEMORY_ERROR;
+
+    XMEMCPY((byte*)sslTemp->suites->suites,
+            (byte*)ssl->suites->suites, ssl->suites->suiteSz);
+    sslTemp->suites->suiteSz = ssl->suites->suiteSz;
+
+    sslTemp->CBIOSend = ssl->CBIOSend;
+    sslTemp->IOCB_WriteCtx = ssl->IOCB_WriteCtx;
+
+    ret = copySupportedCurves(sslTemp, ssl);
+    if (ret != 0)
+        goto exit;
+
+    /* copy session */
+    /* copy psk callbacks */
+    /* copy version */
+
+    XMEMCPY(sslTemp->buffers.tls13CookieSecret.buffer,
+        ssl->buffers.tls13CookieSecret.buffer,
+        ssl->buffers.tls13CookieSecret.length);
+    sslTemp->buffers.tls13CookieSecret.length =
+        ssl->buffers.tls13CookieSecret.length;
+
+    if (ssl->buffers.dtlsCtx.peer.sa != NULL) {
+        ret = wolfSSL_dtls_set_peer(sslTemp, ssl->buffers.dtlsCtx.peer.sa,
+            ssl->buffers.dtlsCtx.peer.sz = ssl->buffers.dtlsCtx.peer.sz);
+        if (ret != WOLFSSL_SUCCESS)
+            return ret;
+    }
+
+    tmp = *inOutIdx;
+    ret = DoTls13ClientHello(sslTemp, input, &tmp, helloSz, 1);
+    if (ret != 0)
+        goto exit;
+
+    if (sslTemp->options.serverState == SERVER_HELLO_RETRY_REQUEST_COMPLETE) {
+        ret = SendTls13ServerHello(sslTemp, hello_retry_request);
+        if (ret != 0)
+            goto exit;
+        *process = 0;
+        DtlsResetState(ssl);
+    }
+    else {
+        *process = 1;
+    }
+
+exit:
+    wolfSSL_free(sslTemp);
+    return ret;
+}
+
+#endif /* WOLFSSL_DTLS13 */
+
 #endif /* !defined(NO_WOLFSSL_SERVER) */
 
 #if defined(WOLFSSL_DTLS_CID)

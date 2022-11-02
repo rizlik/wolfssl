@@ -3786,7 +3786,7 @@ int TLSX_UseCertificateStatusRequestV2(TLSX** extensions, byte status_type,
        define HAVE_ECC. Alternatively use FFDHE for DH ciphersuites.
 #endif
 
-static int TLSX_SupportedCurve_New(SupportedCurve** curve, word16 name,
+int TLSX_SupportedCurve_New(SupportedCurve** curve, word16 name,
                                                                      void* heap)
 {
     if (curve == NULL)
@@ -3845,7 +3845,7 @@ static void TLSX_PointFormat_FreeAll(PointFormat* list, void* heap)
     (void)heap;
 }
 
-static int TLSX_SupportedCurve_Append(SupportedCurve* list, word16 name,
+int TLSX_SupportedCurve_Append(SupportedCurve* list, word16 name,
                                                                      void* heap)
 {
     int ret = BAD_FUNC_ARG;

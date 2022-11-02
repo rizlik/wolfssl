@@ -5635,7 +5635,7 @@ static void FreeDch13Args(WOLFSSL* ssl, void* pArgs)
 }
 
 int DoTls13ClientHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
-                       word32 helloSz)
+                       word32 helloSz, byte skipStateless)
 {
     int ret;
 #ifdef WOLFSSL_ASYNC_CRYPT
@@ -5647,6 +5647,18 @@ int DoTls13ClientHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 
     WOLFSSL_START(WC_FUNC_CLIENT_HELLO_DO);
     WOLFSSL_ENTER("DoTls13ClientHello");
+
+#ifdef WOLFSSL_DTLS13
+    if (ssl->options.dtls && !skipStateless) {
+        byte process = 0;
+        ret = DoTls13ClientHelloStateless(ssl, input, inOutIdx, helloSz,
+            &process);
+        if (ret != 0 || process != 1) {
+            *inOutIdx += helloSz;
+            return ret;
+        }
+    }
+#endif /* WOLFSSL_DTLS13 */
 
 #ifdef WOLFSSL_ASYNC_CRYPT
     if (ssl->async == NULL) {
@@ -10253,7 +10265,7 @@ int DoTls13HandShakeMsgType(WOLFSSL* ssl, byte* input, word32* inOutIdx,
     /* Messages only received by server. */
     case client_hello:
         WOLFSSL_MSG("processing client hello");
-        ret = DoTls13ClientHello(ssl, input, inOutIdx, size);
+        ret = DoTls13ClientHello(ssl, input, inOutIdx, size, 0);
         break;
 
     #ifdef WOLFSSL_EARLY_DATA
