@@ -13869,6 +13869,40 @@ static int wolfSSL_DupSessionEx(const WOLFSSL_SESSION* input,
     WOLFSSL_SESSION* output, int avoidSysCalls, byte* ticketNonceBuf,
     byte* ticketNonceLen, byte* preallocUsed);
 
+#ifdef WOLFSSL_DTLS_NO_HVR_ON_RESUME
+int TlsSessionInCache(const byte *id, byte *found)
+{
+    SessionRow* sessRow;
+    WOLFSSL_SESSION *s;
+    word32 row;
+    int count;
+    int error;
+    int idx;
+
+    *found = 0;
+    row = HashObject(id, ID_LEN, &error) % SESSION_ROWS;
+    if (error != 0)
+        return error;
+    sessRow = &SessionCache[row];
+    if (SESSION_ROW_LOCK(sessRow) != 0)
+        return FATAL_ERROR;
+    count = min((word32)sessRow->totalCount, SESSIONS_PER_ROW);
+    idx = sessRow->nextIdx - 1;
+    if (idx < 0 || idx >= SESSIONS_PER_ROW)
+        idx = SESSIONS_PER_ROW - 1;
+    for (; count > 0; --count) {
+        s = &sessRow->Sessions[idx];
+        if (XMEMCMP(s->sessionID, id, ID_LEN) == 0) {
+            *found = 1;
+            break;
+        }
+        idx = idx > 0 ? idx - 1 : SESSIONS_PER_ROW - 1;
+    }
+    SESSION_ROW_UNLOCK(sessRow);
+    return 0;
+}
+#endif /* WOLFSSL_DTLS_NO_HVR_ON_RESUME */
+
 int wolfSSL_GetSessionFromCache(WOLFSSL* ssl, WOLFSSL_SESSION* output)
 {
     WOLFSSL_SESSION* sess = NULL;

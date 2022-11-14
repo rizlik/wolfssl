@@ -19,6 +19,15 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
 
+/*
+ * WOLFSSL_DTLS_NO_HVR_ON_RESUME
+ *     If defined, a DTLS server will not do a cookie exchange on successful
+ *     client resumption: the resumption will be faster (one RTT less) and
+ *     will consume less bandwidth (one ClientHello and one HelloVerifyRequest
+ *     less). On the other hand, if a valid SessionID is collected, forged
+ *     clientHello messages will consume resources on the server.
+ */
+
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
@@ -200,6 +209,104 @@ static int ParseClientHello(const byte* input, word32 helloSz, WolfSSL_CH* ch)
     return 0;
 }
 
+#ifdef WOLFSSL_DTLS_NO_HVR_ON_RESUME
+static int TlsxFindByType(WolfSSL_Vector* ret, word16 extType,
+    WolfSSL_Vector exts)
+{
+    word32 len, idx = 0;
+    word16 type;
+    WolfSSL_Vector ext;
+
+    XMEMSET(ret, 0, sizeof(*ret));
+    len = exts.size;
+    /* type + len */
+    while (len >= OPAQUE16_LEN + OPAQUE16_LEN) {
+        ato16(exts.elements + idx, &type);
+        idx += OPAQUE16_LEN;
+        idx += ReadVector16(exts.elements + idx, &ext);
+        if (idx > exts.size)
+            return BUFFER_ERROR;
+        if (type == extType) {
+            XMEMCPY(ret, &ext, sizeof(ext));
+            return 0;
+        }
+        len = exts.size - idx;
+    }
+    return 0;
+}
+
+#ifdef HAVE_SESSION_TICKET
+static int TlsTicketIsValid(WOLFSSL* ssl, WolfSSL_Vector exts, byte* isValid)
+{
+    byte tempTicket[SESSION_TICKET_LEN];
+    InternalTicket* it;
+    WolfSSL_Vector tlsxSessionTicket;
+    int ret;
+
+    *isValid = 0;
+    ret = TlsxFindByType(&tlsxSessionTicket, TLSX_SESSION_TICKET, exts);
+    if (ret != 0)
+        return ret;
+    if (tlsxSessionTicket.size == 0)
+        return 0;
+    if (tlsxSessionTicket.size > SESSION_TICKET_LEN)
+        return 0;
+    XMEMCPY(tempTicket, tlsxSessionTicket.elements, tlsxSessionTicket.size);
+    ret = DoDecryptTicket(ssl, tempTicket, (word32)tlsxSessionTicket.size, &it);
+    if (ret != WOLFSSL_TICKET_RET_OK && ret != WOLFSSL_TICKET_RET_CREATE)
+        return 0;
+    ForceZero(it, sizeof(InternalTicket));
+    *isValid = 1;
+    return 0;
+}
+#endif /* HAVE_SESSION_TICKET */
+
+static int TlsSessionIdIsValid(WOLFSSL* ssl, WolfSSL_Vector sessionID,
+    byte* isValid)
+{
+    *isValid = 0;
+    if (ssl->options.sessionCacheOff)
+        return 0;
+    if (sessionID.size != ID_LEN)
+        return 0;
+#ifdef HAVE_EXT_CACHE
+    {
+        WOLFSSL_SESSION* sess;
+
+        if (ssl->ctx->get_sess_cb != NULL) {
+            int unused;
+            sess =
+                ssl->ctx->get_sess_cb(ssl, sessionID.elements, ID_LEN, &unused);
+            if (sess != NULL) {
+                *isValid = 1;
+                wolfSSL_FreeSession(ssl->ctx, sess);
+                return 0;
+            }
+        }
+        if (ssl->ctx->internalCacheLookupOff)
+            return 0;
+    }
+#endif
+    return TlsSessionInCache(sessionID.elements, isValid);
+}
+
+static int TlsResumptionIsValid(WOLFSSL* ssl, WolfSSL_CH* ch, byte* isValid)
+{
+    int ret;
+
+    *isValid = 0;
+#ifdef HAVE_SESSION_TICKET
+    ret = TlsTicketIsValid(ssl, ch->extension, isValid);
+    if (ret != 0)
+        return ret;
+    if (*isValid)
+        return 0;
+#endif /* HAVE_SESSION_TICKET */
+    ret = TlsSessionIdIsValid(ssl, ch->sessionId, isValid);
+    return ret;
+}
+#endif
+
 int DoClientHelloStateless(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
     word32 helloSz, byte* process)
 {
@@ -211,6 +318,18 @@ int DoClientHelloStateless(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
     ret = ParseClientHello(input + *inOutIdx, helloSz, &ch);
     if (ret != 0)
         return ret;
+
+#ifdef WOLFSSL_DTLS_NO_HVR_ON_RESUME
+    {
+        byte isValid = 0;
+        ret = TlsResumptionIsValid(ssl, &ch, &isValid);
+        if (ret != 0)
+            return ret;
+        if (isValid)
+            return 0;
+    }
+#endif /* WOLFSSL_DTLS_NO_HVR_ON_RESUME */
+
     ret = CreateDtlsCookie(ssl, &ch, cookie);
     if (ret != 0)
         return ret;
