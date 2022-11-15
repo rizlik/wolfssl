@@ -251,7 +251,7 @@ static int TlsTicketIsValid(WOLFSSL* ssl, Vector exts, byte *isValid)
     XMEMCPY(tempTicket, tlsxSessionTicket.elements, tlsxSessionTicket.size);
     ret = DoDecryptTicket(ssl, tempTicket, (word32)tlsxSessionTicket.size, &it);
     if (ret != WOLFSSL_TICKET_RET_OK && ret != WOLFSSL_TICKET_RET_CREATE)
-        return ret;
+        return 0;
     ForceZero(it, sizeof(InternalTicket));
     *isValid = 1;
     return 0;
@@ -260,8 +260,6 @@ static int TlsTicketIsValid(WOLFSSL* ssl, Vector exts, byte *isValid)
 
 static int TlsSessionIdIsValid(WOLFSSL *ssl, Vector sessionID, byte *isValid)
 {
-    WOLFSSL_SESSION *sess;
-
     *isValid = 0;
     if (ssl->options.sessionCacheOff)
         return 0;
@@ -270,19 +268,23 @@ static int TlsSessionIdIsValid(WOLFSSL *ssl, Vector sessionID, byte *isValid)
     if (sessionID.size != ID_LEN)
         return 0;
 #ifdef HAVE_EXT_CACHE
-    if (ssl->ctx->get_sess_cb != NULL) {
-        int unused;
-        sess = ssl->ctx->get_sess_cb(ssl, sessionID.elements, ID_LEN, &unused);
-        if (sess != NULL) {
-            *isValid = 1;
-            wolfSSL_FreeSession(ssl->ctx, sess);
-            return 0;
+    {
+        WOLFSSL_SESSION *sess;
+
+        if (ssl->ctx->get_sess_cb != NULL) {
+            int unused;
+            sess = ssl->ctx->get_sess_cb(ssl,
+                sessionID.elements, ID_LEN, &unused);
+            if (sess != NULL) {
+                *isValid = 1;
+                wolfSSL_FreeSession(ssl->ctx, sess);
+                return 0;
+            }
         }
+        if (ssl->ctx->internalCacheLookupOff)
+            return 0;
     }
 #endif
-    if (ssl->ctx->internalCacheLookupOff)
-        return 0;
-
     return TlsSessionInCache(sessionID.elements, isValid);
 }
 
@@ -296,9 +298,10 @@ static int TlsResumptionIsValid(WOLFSSL* ssl, CH *ch, byte *isValid)
     if (ret != 0)
         return ret;
     if (*isValid)
-        *isValid = 1;
+        return 0;
 #endif /* HAVE_SESSION_TICKET */
-    return TlsSessionIdIsValid(ssl, ch->sessionId, isValid);
+    ret = TlsSessionIdIsValid(ssl, ch->sessionId, isValid);
+    return ret;
 }
 #endif
 

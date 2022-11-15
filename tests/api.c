@@ -59222,6 +59222,260 @@ static int test_wolfSSL_DTLS_fragment_buckets(void)
 }
 
 #endif
+#if defined(WOLFSSL_DTLS) && !defined(WOLFSSL_NO_TLS12) &&                     \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER)
+
+static int test_wolfSSL_dtls_stateless2(void)
+{
+    WOLFSSL *ssl_c, *ssl_c2, *ssl_s;
+    struct test_memio_ctx test_ctx;
+    WOLFSSL_CTX *ctx_c, *ctx_s;
+    int ret;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ret = test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method);
+    if (ret != 0)
+        return -1;
+    ssl_c2 = wolfSSL_new(ctx_c);
+    if (ssl_c2 == NULL)
+        return -2;
+    wolfSSL_SetIOWriteCtx(ssl_c2, &test_ctx);
+    wolfSSL_SetIOReadCtx(ssl_c2, &test_ctx);
+    /* send CH */
+    ret = wolfSSL_connect(ssl_c2);
+    if (ret == 0 || ssl_c2->error != WANT_READ)
+        return -3;
+    ret = wolfSSL_accept(ssl_s);
+    if (ret == 0 || ssl_s->error != WANT_READ)
+        return -4;
+    if (test_ctx.c_len == 0)
+        return -5;
+    /* consume HRR */
+    test_ctx.c_len = 0;
+    while (!ssl_c->options.handShakeDone && !ssl_s->options.handShakeDone) {
+        ret = wolfSSL_connect(ssl_c);
+        if (ret != WOLFSSL_SUCCESS  && ssl_c->error != WANT_READ)
+            return -8;
+        ret = wolfSSL_accept(ssl_s);
+        if (ret != WOLFSSL_SUCCESS && ssl_s->error != WANT_READ)
+            return -9;
+    }
+    wolfSSL_free(ssl_c2);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+    return 0;
+}
+
+#ifdef HAVE_MAX_FRAGMENT
+static int test_wolfSSL_dtls_stateless_maxfrag(void)
+{
+    WOLFSSL *ssl_c, *ssl_c2, *ssl_s;
+    struct test_memio_ctx test_ctx;
+    WOLFSSL_CTX *ctx_c, *ctx_s;
+    word16 max_fragment;
+
+    int ret;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ret = test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method);
+    if (ret != 0)
+        return -1;
+
+    ssl_c2 = wolfSSL_new(ctx_c);
+    if (ssl_c2 == NULL)
+        return -2;
+    ret = wolfSSL_UseMaxFragment(ssl_c2, WOLFSSL_MFL_2_8);
+    if (ret != WOLFSSL_SUCCESS)
+        return -3;
+    wolfSSL_SetIOWriteCtx(ssl_c2, &test_ctx);
+    wolfSSL_SetIOReadCtx(ssl_c2, &test_ctx);
+
+    max_fragment = ssl_s->max_fragment;
+   /* send CH */
+    ret = wolfSSL_connect(ssl_c2);
+    if (ret == 0 || ssl_c2->error != WANT_READ)
+        return -4;
+
+    ret = wolfSSL_accept(ssl_s);
+    if (ret == 0 || ssl_s->error != WANT_READ)
+        return -5;
+    /* CH without cookie shouldn't change state */
+    if (ssl_s->max_fragment != max_fragment)
+        return -6;
+    if (test_ctx.c_len == 0)
+        return -7;
+    /* consume HRR from buffer */
+    test_ctx.c_len = 0;
+    while (!ssl_c->options.handShakeDone && !ssl_s->options.handShakeDone) {
+        ret = wolfSSL_connect(ssl_c);
+        if (ret != WOLFSSL_SUCCESS  && ssl_c->error != WANT_READ)
+            return -8;
+
+        ret = wolfSSL_accept(ssl_s);
+        if (ret != WOLFSSL_SUCCESS && ssl_s->error != WANT_READ)
+            return -9;
+    }
+    wolfSSL_free(ssl_c2);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+    return 0;
+}
+#endif /* HAVE_MAX_FRAGMENT */
+
+#if defined(WOLFSSL_DTLS_NO_HVR_ON_RESUME)
+#define ROUNDS_WITH_HVR 4
+#define ROUNDS_WITHOUT_HVR 2
+static int _test_wolfSSL_dtls_stateless_resume(byte useticket, byte bad)
+{
+    struct test_memio_ctx test_ctx;
+    WOLFSSL_CTX *ctx_c, *ctx_s;
+    WOLFSSL *ssl_c, *ssl_s;
+    WOLFSSL_SESSION *sess;
+    int ret, round_trips;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ret = test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method);
+    if (ret != 0)
+        return -1;
+#ifdef HAVE_SESSION_TICKET
+    if (useticket) {
+        ret = wolfSSL_CTX_UseSessionTicket(ctx_c);
+        if (ret != WOLFSSL_SUCCESS)
+            return -6;
+    }
+#endif
+    round_trips = ROUNDS_WITH_HVR;
+    ret = test_memio_do_handshake(ssl_c, ssl_s, round_trips, &round_trips);
+    if (ret != 0)
+        return -4;
+    if (round_trips != ROUNDS_WITH_HVR)
+        return -5;
+    sess = wolfSSL_get1_session(ssl_c);
+    if (sess == NULL)
+        return -5;
+    wolfSSL_shutdown(ssl_c);
+    wolfSSL_free(ssl_c);
+    wolfSSL_shutdown(ssl_s);
+    wolfSSL_free(ssl_s);
+    test_ctx.c_len = test_ctx.s_len = 0;
+    /* reset context to invalidate the session */
+    if (bad) {
+        wolfSSL_CTX_free(ctx_c);
+        wolfSSL_CTX_free(ctx_s);
+        ret = test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+            wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method);
+        if (ret != 0)
+            return -1;
+    }
+    ssl_c = wolfSSL_new(ctx_c);
+    ssl_s = wolfSSL_new(ctx_s);
+    wolfSSL_SetIOWriteCtx(ssl_c, &test_ctx);
+    wolfSSL_SetIOReadCtx(ssl_c, &test_ctx);
+    wolfSSL_SetIOWriteCtx(ssl_s, &test_ctx);
+    wolfSSL_SetIOReadCtx(ssl_s, &test_ctx);
+    ret = wolfSSL_set_session(ssl_c, sess);
+    if (ret != WOLFSSL_SUCCESS)
+        return -6;
+    /* expected roundtrips without HVR */
+    round_trips = bad ? ROUNDS_WITH_HVR : ROUNDS_WITHOUT_HVR;
+    ret = test_memio_do_handshake(ssl_c, ssl_s, round_trips, &round_trips);
+    if (ret != 0)
+        return -4;
+    if (round_trips != (bad ? ROUNDS_WITH_HVR : ROUNDS_WITHOUT_HVR))
+        return -5;
+    wolfSSL_SESSION_free(sess);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_s);
+    return 0;
+}
+
+static int test_wolfSSL_dtls_stateless_resume(void)
+{
+    int ret;
+#ifdef HAVE_SESSION_TICKET
+    ret = _test_wolfSSL_dtls_stateless_resume(1, 0);
+    if (ret != 0)
+        return ret;
+    ret = _test_wolfSSL_dtls_stateless_resume(1, 1);
+    if (ret != 0)
+        return ret;
+#endif /* HAVE_SESION_TICKET */
+    ret = _test_wolfSSL_dtls_stateless_resume(0, 0);
+    if (ret != 0)
+        return ret;
+    return _test_wolfSSL_dtls_stateless_resume(0, 1);
+}
+#endif /* WOLFSSL_DTLS_NO_HVR_ON_RESUME */
+
+#if !defined(NO_OLD_TLS)
+static int test_wolfSSL_dtls_stateless_downgrade(void)
+{
+    WOLFSSL_CTX *ctx_c, *ctx_c2, *ctx_s;
+    WOLFSSL *ssl_c, *ssl_c2, *ssl_s;
+    struct test_memio_ctx test_ctx;
+    int ret;
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    ret = test_memio_setup(&test_ctx, &ctx_c, &ctx_s, &ssl_c, &ssl_s,
+        wolfDTLSv1_2_client_method, wolfDTLSv1_2_server_method);
+    if (ret != 0)
+        return -1;
+    ret = wolfSSL_CTX_SetMinVersion(ctx_s, WOLFSSL_DTLSV1);
+    if (ret != WOLFSSL_SUCCESS)
+        return -2;
+    ctx_c2 = wolfSSL_CTX_new(wolfDTLSv1_client_method());
+    if (ctx_c2 == NULL)
+        return -2;
+    wolfSSL_SetIORecv(ctx_c2, test_memio_read_cb);
+    wolfSSL_SetIOSend(ctx_c2, test_memio_write_cb);
+    ssl_c2 = wolfSSL_new(ctx_c2);
+    if (ssl_c2 == NULL)
+        return -3;
+    wolfSSL_SetIOWriteCtx(ssl_c2, &test_ctx);
+    wolfSSL_SetIOReadCtx(ssl_c2, &test_ctx);
+   /* send CH */
+    ret = wolfSSL_connect(ssl_c2);
+    if (ret == 0 || ssl_c2->error != WANT_READ)
+        return -3;
+    ret = wolfSSL_accept(ssl_s);
+    if (ret == 0 || ssl_s->error != WANT_READ)
+        return -4;
+    if (test_ctx.c_len == 0)
+        return -5;
+    /* consume HRR */
+    test_ctx.c_len = 0;
+    while (!ssl_c->options.handShakeDone && !ssl_s->options.handShakeDone) {
+        ret = wolfSSL_connect(ssl_c);
+        if (ret != WOLFSSL_SUCCESS  && ssl_c->error != WANT_READ)
+            return -8;
+
+        ret = wolfSSL_accept(ssl_s);
+        if (ret != WOLFSSL_SUCCESS && ssl_s->error != WANT_READ)
+            return -9;
+    }
+
+    wolfSSL_free(ssl_c2);
+    wolfSSL_free(ssl_c);
+    wolfSSL_free(ssl_s);
+    wolfSSL_CTX_free(ctx_c);
+    wolfSSL_CTX_free(ctx_c2);
+    wolfSSL_CTX_free(ctx_s);
+
+    return 0;
+}
+#endif /* !defined(NO_OLD_TLS) */
+
+#endif /* defined(WOLFSSL_DTLS) && !defined(WOLFSSL_NO_TLS12) && \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER)*/
 
 #if defined(WOLFSSL_DTLS) && !defined(WOLFSSL_NO_TLS12) &&                     \
     !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER) &&              \
@@ -60379,6 +60633,20 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_wolfSSL_DtlsUpdateWindow),
     TEST_DECL(test_wolfSSL_DTLS_fragment_buckets),
 #endif
+#if defined(WOLFSSL_DTLS) && !defined(WOLFSSL_NO_TLS12) &&                     \
+    !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER)
+#ifdef WOLFSSL_DTLS_NO_HVR_ON_RESUME
+    TEST_DECL(test_wolfSSL_dtls_stateless_resume),
+#endif // WOLFSSL_DTLS_NO_HVR_ON_RESUME
+#ifdef HAVE_MAX_FRAGMENT
+    TEST_DECL(test_wolfSSL_dtls_stateless_maxfrag),
+#endif /* HAVE_MAX_FRAGMENT */
+    TEST_DECL(test_wolfSSL_dtls_stateless2),
+#if !defined(NO_OLD_TLS)
+    TEST_DECL(test_wolfSSL_dtls_stateless_downgrade),
+#endif /* !defined(NO_OLD_TLS) */
+#endif /* defined(WOLFSSL_DTLS) && !defined(WOLFSSL_NO_TLS12) &&     \
+        *  !defined(NO_WOLFSSL_CLIENT) && !defined(NO_WOLFSSL_SERVER) */
     TEST_DECL(test_WOLFSSL_dtls_version_alert),
     TEST_DECL(test_ForceZero),
 
