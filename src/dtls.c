@@ -98,30 +98,30 @@ void DtlsResetState(WOLFSSL* ssl)
 #define DTLS_COOKIE_SZ WC_SHA256_DIGEST_SIZE
 #endif /* !NO_SHA256 */
 
-typedef struct WolfSSL_Vector {
+typedef struct WolfSSL_ConstVector {
     word32 size;
     const byte* elements;
-} WolfSSL_Vector;
+} WolfSSL_ConstVector;
 
 typedef struct WolfSSL_CH {
     ProtocolVersion* pv;
     const byte* random;
-    WolfSSL_Vector sessionId;
-    WolfSSL_Vector cookie;
-    WolfSSL_Vector cipherSuite;
-    WolfSSL_Vector compression;
-    WolfSSL_Vector extension;
+    WolfSSL_ConstVector sessionId;
+    WolfSSL_ConstVector cookie;
+    WolfSSL_ConstVector cipherSuite;
+    WolfSSL_ConstVector compression;
+    WolfSSL_ConstVector extension;
     word32 length;
 } WolfSSL_CH;
 
-static int ReadVector8(const byte* input, WolfSSL_Vector* v)
+static int ReadVector8(const byte* input, WolfSSL_ConstVector* v)
 {
     v->size = *input;
     v->elements = input + OPAQUE8_LEN;
     return v->size + OPAQUE8_LEN;
 }
 
-static int ReadVector16(const byte* input, WolfSSL_Vector* v)
+static int ReadVector16(const byte* input, WolfSSL_ConstVector* v)
 {
     word16 size16;
     ato16(input, &size16);
@@ -185,22 +185,16 @@ static int ParseClientHello(const byte* input, word32 helloSz, WolfSSL_CH* ch)
     ch->random = (byte*)(input + idx);
     idx += RAN_LEN;
     idx += ReadVector8(input + idx, &ch->sessionId);
-    if (idx > helloSz)
-        return BUFFER_ERROR;
-    if (helloSz - idx < OPAQUE8_LEN)
+    if (idx > helloSz - OPAQUE8_LEN)
         return BUFFER_ERROR;
     idx += ReadVector8(input + idx, &ch->cookie);
-    if (idx > helloSz)
-        return BUFFER_ERROR;
-    if (helloSz - idx < OPAQUE16_LEN)
+    if (idx > helloSz - OPAQUE16_LEN)
         return BUFFER_ERROR;
     idx += ReadVector16(input + idx, &ch->cipherSuite);
-    if (idx > helloSz)
+    if (idx > helloSz - OPAQUE8_LEN)
         return BUFFER_ERROR;
     idx += ReadVector8(input + idx, &ch->compression);
-    if (idx > helloSz)
-        return BUFFER_ERROR;
-    if (helloSz - idx < OPAQUE16_LEN)
+    if (idx > helloSz - OPAQUE16_LEN)
         return BUFFER_ERROR;
     idx += ReadVector16(input + idx, &ch->extension);
     if (idx > helloSz)
@@ -210,12 +204,12 @@ static int ParseClientHello(const byte* input, word32 helloSz, WolfSSL_CH* ch)
 }
 
 #ifdef WOLFSSL_DTLS_NO_HVR_ON_RESUME
-static int TlsxFindByType(WolfSSL_Vector* ret, word16 extType,
-    WolfSSL_Vector exts)
+static int TlsxFindByType(WolfSSL_ConstVector* ret, word16 extType,
+    WolfSSL_ConstVector exts)
 {
     word32 len, idx = 0;
     word16 type;
-    WolfSSL_Vector ext;
+    WolfSSL_ConstVector ext;
 
     XMEMSET(ret, 0, sizeof(*ret));
     len = exts.size;
@@ -236,11 +230,12 @@ static int TlsxFindByType(WolfSSL_Vector* ret, word16 extType,
 }
 
 #ifdef HAVE_SESSION_TICKET
-static int TlsTicketIsValid(WOLFSSL* ssl, WolfSSL_Vector exts, byte* isValid)
+static int TlsTicketIsValid(WOLFSSL* ssl, WolfSSL_ConstVector exts,
+    byte* isValid)
 {
     byte tempTicket[SESSION_TICKET_LEN];
     InternalTicket* it;
-    WolfSSL_Vector tlsxSessionTicket;
+    WolfSSL_ConstVector tlsxSessionTicket;
     int ret;
 
     *isValid = 0;
@@ -261,9 +256,13 @@ static int TlsTicketIsValid(WOLFSSL* ssl, WolfSSL_Vector exts, byte* isValid)
 }
 #endif /* HAVE_SESSION_TICKET */
 
-static int TlsSessionIdIsValid(WOLFSSL* ssl, WolfSSL_Vector sessionID,
+static int TlsSessionIdIsValid(WOLFSSL* ssl, WolfSSL_ConstVector sessionID,
     byte* isValid)
 {
+    WOLFSSL_SESSION* sess;
+    word32 sessRow;
+    int ret;
+
     *isValid = 0;
     if (ssl->options.sessionCacheOff)
         return 0;
@@ -271,7 +270,6 @@ static int TlsSessionIdIsValid(WOLFSSL* ssl, WolfSSL_Vector sessionID,
         return 0;
 #ifdef HAVE_EXT_CACHE
     {
-        WOLFSSL_SESSION* sess;
 
         if (ssl->ctx->get_sess_cb != NULL) {
             int unused;
@@ -287,7 +285,13 @@ static int TlsSessionIdIsValid(WOLFSSL* ssl, WolfSSL_Vector sessionID,
             return 0;
     }
 #endif
-    return TlsSessionInCache(sessionID.elements, isValid);
+    ret = TlsSessionCacheGetAndLock(sessionID.elements, &sess, &sessRow);
+    if (ret == 0 && sess != NULL) {
+        *isValid = 1;
+        TlsSessionCacheUnlockRow(sessRow);
+    }
+
+    return 0;
 }
 
 static int TlsResumptionIsValid(WOLFSSL* ssl, WolfSSL_CH* ch, byte* isValid)

@@ -3867,9 +3867,9 @@ WOLFSSL_LOCAL ClientSession* AddSessionToClientCache(int side, int row, int idx,
 #endif
 WOLFSSL_LOCAL
 WOLFSSL_SESSION* ClientSessionToSession(const WOLFSSL_SESSION* session);
-#ifdef WOLFSSL_DTLS_NO_HVR_ON_RESUME
-WOLFSSL_LOCAL int TlsSessionInCache(const byte *id, byte *found);
-#endif /* WOLFSSL_DTLS_NO_HVR_ON_RESUME */
+WOLFSSL_LOCAL void TlsSessionCacheUnlockRow(word32 row);
+WOLFSSL_LOCAL int TlsSessionCacheGetAndLock(const byte *id,
+    WOLFSSL_SESSION **sess, word32 *lockedRow);
 /* WOLFSSL_API to test it in tests/api.c */
 WOLFSSL_API int wolfSSL_GetSessionFromCache(WOLFSSL* ssl, WOLFSSL_SESSION* output);
 WOLFSSL_LOCAL int wolfSSL_SetSession(WOLFSSL* ssl, WOLFSSL_SESSION* session);
