@@ -6348,7 +6348,7 @@ WOLFSSL_LOCAL int SendCertificateRequest(WOLFSSL* ssl);
 #if defined(HAVE_CERTIFICATE_STATUS_REQUEST) \
  || defined(HAVE_CERTIFICATE_STATUS_REQUEST_V2)
 WOLFSSL_LOCAL int CreateOcspResponse(WOLFSSL* ssl, OcspRequest** ocspRequest,
-                       buffer* response);
+                       buffer* response, int verify);
 #endif
 #if defined(HAVE_SECURE_RENEGOTIATION) && \
     !defined(NO_WOLFSSL_SERVER)

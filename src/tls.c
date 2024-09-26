@@ -123,6 +123,10 @@ static int TLSX_PopulateSupportedGroups(WOLFSSL* ssl, TLSX** extensions);
     #define HSHASH_SZ FINISHED_SZ
 #endif
 
+/* WOLFSSL_TRUST_OWN_CERT: if enabled, trust your own certificate and provide
+ * an OCSP response, even if yuo didn't have a CA root to verify your own
+ * certificate. */
+
 int BuildTlsHandshakeHash(WOLFSSL* ssl, byte* hash, word32* hashLen)
 {
     int ret = 0;
@@ -3245,6 +3249,7 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, const byte* input, word16 length,
 #if !defined(NO_WOLFSSL_CLIENT) && defined(WOLFSSL_TLS13)
     word32 resp_length = 0;
 #endif
+    int verify;
 
     /* shut up compiler warnings */
     (void) ssl; (void) input;
@@ -3393,7 +3398,11 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, const byte* input, word16 length,
             }
             InitDecodedCert(cert, ssl->buffers.certificate->buffer,
                             ssl->buffers.certificate->length, ssl->heap);
-            ret = ParseCert(cert, CERT_TYPE, 1, SSL_CM(ssl));
+            verify = VERIFY;
+#if defined(WOLFSSL_TRUST_OWN_CERT)
+            verify = NO_VERIFY;
+#endif
+            ret = ParseCert(cert, CERT_TYPE, verify, SSL_CM(ssl));
             if (ret != 0) {
                 FreeDecodedCert(cert);
                 XFREE(cert, ssl->heap, DYNAMIC_TYPE_DCERT);
@@ -3420,7 +3429,7 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, const byte* input, word16 length,
                 return MEMORY_ERROR;
 
             request = &csr->request.ocsp;
-            ret = CreateOcspResponse(ssl, &request, &csr->response);
+            ret = CreateOcspResponse(ssl, &request, &csr->response, verify);
             if (ret != 0)
                 return ret;
             if (csr->response.buffer)

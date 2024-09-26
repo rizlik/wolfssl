@@ -23440,7 +23440,7 @@ int SendFinished(WOLFSSL* ssl)
  */
 static int CreateOcspRequest(WOLFSSL* ssl, OcspRequest* request,
                              DecodedCert* cert, byte* certData, word32 length,
-                             byte *ctxOwnsRequest)
+                             byte *ctxOwnsRequest, int verify)
 {
     int ret;
 
@@ -23452,7 +23452,7 @@ static int CreateOcspRequest(WOLFSSL* ssl, OcspRequest* request,
 
     InitDecodedCert(cert, certData, length, ssl->heap);
     /* TODO: Setup async support here */
-    ret = ParseCertRelative(cert, CERT_TYPE, VERIFY, SSL_CM(ssl), NULL);
+    ret = ParseCertRelative(cert, CERT_TYPE, verify, SSL_CM(ssl), NULL);
     if (ret != 0) {
         WOLFSSL_MSG("ParseCert failed");
     }
@@ -23491,7 +23491,7 @@ static int CreateOcspRequest(WOLFSSL* ssl, OcspRequest* request,
  * Returns 0 on success
  */
 int CreateOcspResponse(WOLFSSL* ssl, OcspRequest** ocspRequest,
-                       buffer* response)
+                       buffer* response, int verify)
 {
     int          ret = 0;
     OcspRequest* request = NULL;
@@ -23534,7 +23534,7 @@ int CreateOcspResponse(WOLFSSL* ssl, OcspRequest** ocspRequest,
         createdRequest = 1;
         if (ret == 0) {
             ret = CreateOcspRequest(ssl, request, cert, der->buffer,
-                      der->length, &ctxOwnsRequest);
+                      der->length, &ctxOwnsRequest, verify);
         }
 
         if (ret != 0) {
@@ -24200,6 +24200,7 @@ int SendCertificateStatus(WOLFSSL* ssl)
 {
     int ret = 0;
     byte status_type = 0;
+    int verify = VERIFY;
 
     WOLFSSL_START(WC_FUNC_CERTIFICATE_STATUS_SEND);
     WOLFSSL_ENTER("SendCertificateStatus");
@@ -24214,6 +24215,10 @@ int SendCertificateStatus(WOLFSSL* ssl)
     status_type = status_type ? status_type : ssl->status_request_v2;
 #endif
 
+#ifdef WOLFSSL_TRUST_OWN_CERT
+    verify = NO_VERIFY;
+#endif
+
     switch (status_type) {
 
     #ifndef NO_WOLFSSL_SERVER
@@ -24225,7 +24230,7 @@ int SendCertificateStatus(WOLFSSL* ssl)
             OcspRequest* request = ssl->ctx->certOcspRequest;
             buffer response;
 
-            ret = CreateOcspResponse(ssl, &request, &response);
+            ret = CreateOcspResponse(ssl, &request, &response, verify);
 
             /* if a request was successfully created and not stored in
              * ssl->ctx then free it */
@@ -24264,7 +24269,7 @@ int SendCertificateStatus(WOLFSSL* ssl)
 
             XMEMSET(responses, 0, sizeof(responses));
 
-            ret = CreateOcspResponse(ssl, &request, &responses[0]);
+            ret = CreateOcspResponse(ssl, &request, &responses[0], verify);
 
             /* if a request was successfully created and not stored in
              * ssl->ctx then free it */
@@ -24318,7 +24323,7 @@ int SendCertificateStatus(WOLFSSL* ssl)
                             break;
 
                         ret = CreateOcspRequest(ssl, request, cert, der.buffer,
-                                                der.length, &ctxOwnsRequest);
+                                                der.length, &ctxOwnsRequest, verify);
                         if (ret == 0) {
                             request->ssl = ssl;
                         ret = CheckOcspRequest(SSL_CM(ssl)->ocsp_stapling,
