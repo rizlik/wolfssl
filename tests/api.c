@@ -95340,6 +95340,69 @@ static int test_ocsp_callback_fails(void)
     defined(HAVE_CERTIFICATE_STATUS_REQUEST) */
 
 
+#if defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(HAVE_OCSP) && \
+    defined(HAVE_CERTIFICATE_STATUS_REQUEST) && \
+    !defined(WOLFSSL_NO_TLS12) && \
+    defined(WOLFSSL_TRUST_OWN_CERT)
+static int test_ocsp_return_hardcoded(void* ctx, const char* url, int urlSz,
+    byte* ocspReqBuf, int ocspReqSz, byte** ocspRespBuf)
+{
+    const char* responseFile = "./certs/ocsp/test-response.der";
+    byte* data = (byte*)ctx;
+    XFILE f = XBADFILE;
+    int dataSz = 0;
+
+    (void)url;
+    (void)urlSz;
+    (void)ocspReqBuf;
+    (void)ocspReqSz;
+
+    ExpectTrue((f = XFOPEN(responseFile, "rb")) != XBADFILE);
+    ExpectIntGT(dataSz = (word32)XFREAD(data, 1, 4096, f), 0);
+    if (f != XBADFILE) {
+        XFCLOSE(f);
+        f = XBADFILE;
+    }
+    *ocspRespBuf = data;
+    return dataSz;
+}
+static int test_ocsp_trust_own_cert(void)
+{
+    struct test_ssl_memio_ctx test_ctx;
+    byte data[4096];
+    EXPECT_DECLS
+
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    test_ctx.c_cb.caPemFile = "./certs/ocsp/root-ca-cert.pem"
+    test_ctx.s_cb.certPemFile = "./certs/ocsp/server1-cert.pem"
+    test_ctx.s_cb.keyPemFile = "./certs/ocsp/server1-key.pem"
+    ExpectIntEQ(test_ssl_memio_setup(&test_ctx), TEST_SUCCCESS);
+    ExpectIntEQ(wolfSSL_CTX_EnableOCSPStapling(test_ctx.c_ctx), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_CTX_EnableOCSPStapling(test_ctx.s_ctx), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_UseOCSPStapling(test_ctx.c_ssl, WOLFSSL_CSR_OCSP,0), WOLFSSL_SUCCESS);
+    /* override URL to avoid exing from SendCertificateStatus because of no AuthInfo on the certificate */
+    ExpectIntEQ(wolfSSL_CTX_SetOCSP_OverrideURL(test_ctx.s_ctx, "http://dummy.test"), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_CTX_EnableOCSP(test_ctx.s_ctx, WOLFSSL_OCSP_NO_NONCE    | WOLFSSL_OCSP_URL_OVERRIDE), WOLFSSL_SUCCESS);
+    ExpectIntEQ(wolfSSL_SetOCSP_Cb(test_ctx.s_ssl, test_ocsp_callback_fails_cb, NULL, (void*)data), WOLFSSL_SUCCESS);
+    ExpectIntEQ(test_ssl_memio_do_handshake(test_ctx.c_ssl, test_ctx.s_ssl, 10, NULL), TEST_SUCCCESS);
+
+    wolfSSL_free(test_ctx.c_ssl);
+    wolfSSL_free(test_ctx.s_ssl);
+    wolfSSL_CTX_free(test_ctx.ctx_c);
+    wolfSSL_CTX_free(test_ctx.s_ctx);
+
+    return EXPECT_RESULT();
+}
+#else
+static int test_ocsp_trust_own_cert(void)
+{
+    return TEST_SKIPPED;
+}
+#endif /* defined(HAVE_MANUAL_MEMIO_TESTS_DEPENDENCIES) && \
+    defined(HAVE_OCSP) && \
+    defined(HAVE_CERTIFICATE_STATUS_REQUEST) */
+
 /*----------------------------------------------------------------------------*
  | Main
  *----------------------------------------------------------------------------*/
@@ -96592,6 +96655,7 @@ TEST_CASE testCases[] = {
     TEST_DECL(test_wolfSSL_UseOCSPStaplingV2),
     TEST_DECL(test_self_signed_stapling),
     TEST_DECL(test_ocsp_callback_fails),
+    TEST_DECL(test_ocsp_trust_own_cert),
 
     /* Multicast */
     TEST_DECL(test_wolfSSL_mcast),
