@@ -24195,6 +24195,39 @@ static int BuildCertificateStatus(WOLFSSL* ssl, byte type, buffer* status,
 #endif
 #endif /* NO_WOLFSSL_SERVER */
 
+static int BuildCertificateStatusWithStatusCB(WOLFSSL* ssl)
+{
+    WOLFSSL_OCSP *ocsp;
+    void *ioCtx = NULL;
+    buffer response;
+    int ret;
+
+    ocsp = SSL_CM(ssl)->ocsp_stapling;
+    if (ocsp->statusCb == NULL)
+        return BAD_FUNC_ARG;
+    ioCtx = (ssl && ssl->ocspIOCtx != NULL) ?
+                                        ssl->ocspIOCtx : ocsp->cm->ocspIOCtx;
+    XMEMSET(&response, 0, sizeof(response));
+    WOLFSSL_MSG("Calling ocsp->statusCb");
+    ret = ocsp->statusCb(ssl, ioCtx);
+    switch (ret) {
+        case SSL_TLSEXT_ERR_OK:
+            response.length = wolfSSL_get_ocsp_response(ssl, &response.buffer);
+            return BuildCertificateStatus(ssl, WOLFSSL_CSR_OCSP, &response, 1);
+            break;
+        case SSL_TLSEXT_ERR_NOACK:
+            ret = OCSP_LOOKUP_FAIL;
+            break;
+        case SSL_TLSEXT_ERR_ALERT_FATAL:
+        default:
+            WOLFSSL_LEAVE("CheckOcspRequest", ocsp->error);
+            ret = WOLFSSL_FATAL_ERROR;
+            break;
+    }
+    WOLFSSL_LEAVE("CheckOcspRequest", ret);
+        return ret;
+    return -1;
+}
 /* handle generation of certificate_status (22) */
 int SendCertificateStatus(WOLFSSL* ssl)
 {
@@ -24217,6 +24250,12 @@ int SendCertificateStatus(WOLFSSL* ssl)
 
 #ifdef WOLFSSL_TRUST_OWN_CERT
     verify = NO_VERIFY;
+#endif
+
+#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY)
+    if (ssl != NULL && SSL_CM(ssl) != NULL && SSL_CM(ssl)->ocsp_stapling->statusCb != NULL) {
+        return BuildCertificateStatusWithStatusCB(ssl);
+    }
 #endif
 
     switch (status_type) {
