@@ -292,7 +292,7 @@ static int GetOcspStatus(WOLFSSL_OCSP* ocsp, OcspRequest* request,
  */
 int CheckOcspResponse(WOLFSSL_OCSP *ocsp, byte *response, int responseSz,
                       WOLFSSL_BUFFER_INFO *responseBuffer, CertStatus *status,
-                      OcspEntry *entry, OcspRequest *ocspRequest, void* heap)
+                      OcspEntry *entry, OcspRequest *ocspRequest, int noverify, void* heap)
 {
 #ifdef WOLFSSL_SMALL_STACK
     CertStatus*   newStatus;
@@ -333,7 +333,7 @@ int CheckOcspResponse(WOLFSSL_OCSP *ocsp, byte *response, int responseSz,
         ocspResponse->pendingCAs = TLSX_CSR2_GetPendingSigners(((WOLFSSL*)ocspRequest->ssl)->extensions);
     }
 #endif
-    ret = OcspResponseDecode(ocspResponse, ocsp->cm, ocsp->cm->heap, 0);
+    ret = OcspResponseDecode(ocspResponse, ocsp->cm, ocsp->cm->heap, noverify);
     if (ret != 0) {
         ocsp->error = ret;
         WOLFSSL_LEAVE("OcspResponseDecode failed", ocsp->error);
@@ -487,9 +487,15 @@ int CheckOcspRequest(WOLFSSL_OCSP* ocsp, OcspRequest* ocspRequest,
         switch (ret) {
             case SSL_TLSEXT_ERR_OK:
                 ret = wolfSSL_get_ocsp_response(ssl, &response);
-                ret = CheckOcspResponse(ocsp, response, ret, responseBuffer,
-                                        status, entry, NULL, heap);
+                responseBuffer->buffer = (byte*)XMALLOC((size_t)responseSz, heap,
+                                                        DYNAMIC_TYPE_TMP_BUFFER);
+
+                if (responseBuffer->buffer) {
+                    responseBuffer->length = (unsigned int)responseSz;
+                    XMEMCPY(responseBuffer->buffer, response, (size_t)responseSz);
+                }
                 XFREE(response, NULL, DYNAMIC_TYPE_OPENSSL);
+                ret = 0;
                 break;
             case SSL_TLSEXT_ERR_NOACK:
                 ret = OCSP_LOOKUP_FAIL;
@@ -541,7 +547,7 @@ int CheckOcspRequest(WOLFSSL_OCSP* ocsp, OcspRequest* ocspRequest,
 
     if (responseSz >= 0 && response) {
         ret = CheckOcspResponse(ocsp, response, responseSz, responseBuffer, status,
-                            entry, ocspRequest, heap);
+                            entry, ocspRequest, 0, heap);
     }
 
     if (response != NULL && ocsp->cm->ocspRespFreeCb)

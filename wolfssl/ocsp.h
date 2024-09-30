@@ -72,7 +72,7 @@ WOLFSSL_LOCAL int  CheckOcspRequest(WOLFSSL_OCSP* ocsp,
 WOLFSSL_LOCAL int CheckOcspResponse(WOLFSSL_OCSP *ocsp, byte *response, int responseSz,
                                     WOLFSSL_BUFFER_INFO *responseBuffer, CertStatus *status,
                                     OcspEntry *entry, OcspRequest *ocspRequest,
-                                    void* heap);
+                                    int noverify, void* heap);
 
 WOLFSSL_LOCAL int CheckOcspResponder(OcspResponse *bs, DecodedCert *cert,
                                      void* vp);
