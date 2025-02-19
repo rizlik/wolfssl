@@ -583,3 +583,109 @@ int test_wolfSSL_dtls_cid_parse(void)
 #endif
     return EXPECT_RESULT();
 }
+
+
+#if defined(WOLFSSL_THREADED_CRYPT)
+
+/* Mock encryption context */
+struct encryptCtx {
+    WOLFSSL* ssl;              /* SSL object to encrypt data in */
+    int signalReceived;        /* Flag to track if signal callback was called */
+};
+
+/* Mock encryption callback */
+static void mock_enc_signal(void* ctx, WOLFSSL* ssl)
+{
+    struct encryptCtx* data = (struct encryptCtx*)ctx;
+    data->signalReceived = 1;
+    (void)ssl;
+}
+
+int test_dtls13_threaded_crypt(void)
+{
+    EXPECT_DECLS;
+    test_ssl_memio_ctx test_ctx;
+    struct encryptCtx encCtx;
+    int ret;
+    char msg[] = "Test message";
+    char buff[256];
+    int msgSz = (int)XSTRLEN(msg);
+
+    /* Initialize test context */
+    XMEMSET(&test_ctx, 0, sizeof(test_ctx));
+    test_ctx.c_cb.method = wolfDTLSv1_3_client_method;
+    test_ctx.s_cb.method = wolfDTLSv1_3_server_method;
+    ExpectIntEQ(test_ssl_memio_setup(&test_ctx), TEST_SUCCESS);
+
+    /* Initialize encryption context */
+    encCtx.ssl = test_ctx.s_ssl;
+    encCtx.signalReceived = 0;
+
+    ExpectIntEQ(wolfSSL_AsyncEncryptSetSignal(test_ctx.s_ssl, 0,
+                                             mock_enc_signal, &encCtx),
+                0);
+
+
+    /* Perform handshake */
+    ret = test_ssl_memio_do_handshake(&test_ctx, 10, NULL);
+    ExpectIntEQ(ret, TEST_SUCCESS);
+
+    /* Perform 4 key updates with data exchange */
+    for (int i = 0; i < 4; i++) {
+        /* Write test message from server to client */
+        encCtx.signalReceived = 0;
+        ret = wolfSSL_write(test_ctx.s_ssl, msg, msgSz);
+        /*ExpectIntEQ(ret, msgSz);*/
+        ExpectTrue(encCtx.signalReceived);
+
+        /* Perform encryption in main thread if needed */
+        if (wolfSSL_AsyncEncryptReady(test_ctx.s_ssl, 0)) {
+            wolfSSL_AsyncEncrypt(test_ctx.s_ssl, 0);
+        }
+
+        /* Send another message, this trigger the sending of the message
+         * encrypted by the thread */
+        encCtx.signalReceived = 0;
+        /* ret = wolfSSL_write(test_ctx.s_ssl, msg, msgSz); */
+        ret = wolfSSL_write(test_ctx.s_ssl, msg, 0);
+        /* ExpectIntEQ(ret, msgSz); */
+        ExpectFalse(encCtx.signalReceived);
+
+        /* Read message on client */
+        XMEMSET(buff, 0, sizeof(buff));
+        ret = wolfSSL_read(test_ctx.c_ssl, buff, sizeof(buff));
+        /* ExpectIntEQ(ret, msgSz); */
+        ExpectStrEQ(buff, msg);
+
+        /* Trigger key update */
+        ret = wolfSSL_update_keys(test_ctx.s_ssl);
+        ExpectIntEQ(ret, WOLFSSL_SUCCESS);
+
+        /* Read on client, reads the key update and sends ack */
+        XMEMSET(buff, 0, sizeof(buff));
+        ret = wolfSSL_read(test_ctx.c_ssl, buff, sizeof(buff));
+        ExpectIntEQ(ret, -1);
+        /* ExpectIntEQ(wolfSSL_get_error(test_ctx.s_ssl, ret), WOLFSSL_ERROR_WANT_WRITE); */
+
+        /* might be not needed if WOLFSSL_RW_THREADED is not defined */
+        ret = wolfSSL_write(test_ctx.c_ssl, msg, 0);
+
+        /* Read on server, get the ack and update the keys */
+        XMEMSET(buff, 0, sizeof(buff));
+        ret = wolfSSL_read(test_ctx.s_ssl, buff, sizeof(buff));
+        ExpectIntEQ(ret, -1);
+
+        /* write on server, should update the key */
+        /* ExpectIntEQ(wolfSSL_get_error(test_ctx.s_ssl, ret), WOLFSSL_ERROR_WANT_WRITE); */
+    }
+
+    /* Clean up test resources */
+    test_ssl_memio_cleanup(&test_ctx);
+
+    return EXPECT_RESULT();
+}
+#else
+int TestDtls13ThreadedCrypt(void) {
+    return TEST_SKIPPED;
+}
+#endif

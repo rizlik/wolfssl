@@ -25,5 +25,5 @@
 int test_dtls12_basic_connection_id(void);
 int test_dtls13_basic_connection_id(void);
 int test_wolfSSL_dtls_cid_parse(void);
-
+int test_dtls13_threaded_crypt(void);
 #endif /* TESTS_API_DTLS_H */
